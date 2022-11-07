@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.3.32929.385
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BatteryMonitorControl", "BatteryMonitorControl\BatteryMonitorControl.vcxproj", "{BD5D546E-F254-4347-A4A4-A874EA335129}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BD5D546E-F254-4347-A4A4-A874EA335129}.Debug|x86.ActiveCfg = Debug|Win32
+		{BD5D546E-F254-4347-A4A4-A874EA335129}.Debug|x86.Build.0 = Debug|Win32
+		{BD5D546E-F254-4347-A4A4-A874EA335129}.Release|x86.ActiveCfg = Release|Win32
+		{BD5D546E-F254-4347-A4A4-A874EA335129}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E0EF313F-CB38-45B7-B556-EB9E1947E747}
+	EndGlobalSection
+EndGlobal
