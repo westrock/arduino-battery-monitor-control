@@ -1,10 +1,26 @@
-﻿// Visual Micro is in vMicro>General>Tutorial Mode
-// 
-/*
-	Name:       BatteryMonitorControl.ino
-	Created:	11/6/2022 19:21:14
-	Author:     NUC8\efigarsky
-*/
+﻿/**
+ *  Name:       BatteryMonitorControl.ino
+ *  My Extension to some open source application
+ *
+ *  Copyright 2022 by Edward Figarsky <efigarsky@gmail.com>
+ *
+ * This file is part of an open source application.
+ *
+ * Some open source application is free software: you can redistribute
+ * it and/or modify it under the terms of the GNU General Public
+ * License as published by the Free Software Foundation, either
+ * version 3 of the License, or (at your option) any later version.
+ *
+ * Some open source application is distributed in the hope that it will
+ * be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
+ */
 
 #include <config.h>
 #include <ds3231.h>
@@ -55,11 +71,16 @@ typedef struct vMinMaxTMinMax VMinVMaxTMinTMax;
 volatile bool sleepRequested = true;
 volatile bool wakeSleepISRSet = false;
 
+uint8_t currentHour;					// The current hour.  Used to store/update samples
+CurrentHourData currentHourData;		// Total, min, and max values for the current hour
+HourlyData hourlyData[DATA_HOURS];		// 
+
+
 const uint8_t rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 struct ts t;
 
-VMinVMaxTMinTMax dataPoints[24];
+VMinVMaxTMinTMax dataPoints[DATA_HOURS];
 
 // DS3231 alarm time
 
@@ -70,44 +91,43 @@ float GetAverageVoltage(uint8_t voltagePin, float voltageScale, uint8_t samples,
 float GetAverageTemp(uint8_t tempPin, float tempScale, uint8_t samples, uint16_t delayMillis);
 void doBlink(uint8_t ledPin);
 void sleepISR();
-void setNextAlarm(uint8_t wakeInHours, uint8_t wakeInMinutes, uint8_t wakeInSeconds);
+void preSleep();
+void doWakingTasks();
+
 
 void printCharInHexadecimal(char* str, int len);
 
 
 void setup() {
 	// put your setup code here, to run once:
-	int hour;
+	Serial.begin(9600);
 
-	for (hour = 0; hour < 24; hour++) {
+	for (int hour = 0; hour < DATA_HOURS; hour++) {
 		dataPoints[hour].vMin = 0xFFFF;
 		dataPoints[hour].vMax = 0x0000;
 		dataPoints[hour].tMin = 0xFFFF;
 		dataPoints[hour].tMax = 0x0000;
 	}
 
-	Serial.begin(115200);
-
-	lcd.begin(20, 4);
-
 	// Set the voltage-monitoring pins
 	pinMode(TEMP_SENSOR, INPUT);
 	pinMode(V5_SENSOR, INPUT);
 	pinMode(VBATT_RELAY, OUTPUT);
-
-	analogReference(EXTERNAL);
-
-	digitalWrite(VBATT_RELAY, HIGH);
-	delay(500);
-
-	// Keep pins high until we ground them
 	pinMode(WAKE_SLEEP_PIN, INPUT_PULLUP);
 	pinMode(RTC_WAKE_PIN, INPUT_PULLUP);
+
+	// Set the VREF basis to the external value
+	// and allow voltage to come in.
+	digitalWrite(VBATT_RELAY, HIGH);
+	delay(100);
+
+	analogReference(EXTERNAL);
 
 	// Flashing LED just to show the �Controller is running
 	digitalWrite(LED_PIN, LOW);
 	pinMode(LED_PIN, OUTPUT);
 
+	lcd.begin(20, 4);
 	// Clear the current alarm (puts DS3231 INT high)
 	Wire.begin();
 	DS3231_init(DS3231_CONTROL_INTCN);
@@ -118,16 +138,13 @@ void setup() {
 
 	DS3231_clear_a1f();
 
-	// Set the VREF basis to the external value
-	// and allow voltage to come in.
-	analogReference(EXTERNAL);
-	digitalWrite(VBATT_RELAY, HIGH);
-	delay(100);
+	DS3231_get(&t);
+	prepCurrentHour(&currentHourData, t.hour);
+	prepHourlyData(hourlyData, DATA_HOURS);
 
 	Serial.println("Setup completed.");
 }
 
-int tempInt = analogRead(TEMP_SENSOR) * VREF * 100 / 1024.0;
 
 
 float GetAverageTemp(uint8_t tempPin, float tempScale, uint8_t samples, uint16_t delayMillis) {
@@ -137,7 +154,7 @@ float GetAverageTemp(uint8_t tempPin, float tempScale, uint8_t samples, uint16_t
 		delay(delayMillis);
 		rawTempSum += analogRead(tempPin);
 	}
-	return rawTempSum / samples * tempScale * 100.0 / 1024.0;
+	return rawTempSum / static_cast<float>(samples) * tempScale * 100.0 / 1024.0;
 }
 
 
@@ -148,7 +165,7 @@ float GetAverageVoltage(uint8_t voltagePin, float voltageScale, uint8_t samples,
 		delay(delayMillis);
 		rawVoltageSum += analogRead(voltagePin);
 	}
-	return rawVoltageSum / samples * voltageScale;
+	return rawVoltageSum / static_cast<float>(samples) * voltageScale;
 }
 
 
@@ -165,48 +182,87 @@ void printCharInHexadecimal(char* str, int len) {
 }
 
 void loop() {
+	static byte prevADCSRA;
+	static uint8_t oldSec = 99;
+	char buff[BUFF_MAX];
+
+	if (!wakeSleepISRSet) {
+		noInterrupts();
+		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_PIN), wakeSleepControlISR, LOW);
+		wakeSleepISRSet = true;
+		interrupts();
+		Serial.println("wakeSleepISRSet ACTIVATED");
+	}
+
+	// Just blink LED twice to show we're running
+	doBlink(LED_PIN);
+
+	//  if (digitalRead(WAKE_SLEEP_PIN) == LOW) {
+	//    sleepRequested = !sleepRequested;
+	//  }
+
+	// Is the "go to sleep" pin now LOW?
+	if (sleepRequested)
+	{
+		Serial.println("sleep REQUESTED");
+
+		setAlarmAndSleep(RTC_WAKE_PIN, sleepISR, preSleep, &prevADCSRA, 0, 1, 0);
+		postWakeISRCleanup(&prevADCSRA);
+
+		doWakingTasks();
+	}
+	else
+	{
+		// Get the time
+		DS3231_get(&t);
+
+		// If the seconds has changed, display the (new) time
+		if (t.sec != oldSec)
+		{
+			// display current time
+			snprintf(buff, BUFF_MAX, "%d.%02d.%02d %02d:%02d:%02d\n", t.year,
+				t.mon, t.mday, t.hour, t.min, t.sec);
+			Serial.print(buff);
+			Serial.println(t.year);
+			oldSec = t.sec;
+		}
+	}
+}
+
+void doWakingTasks() {
 	char voltStr[6];
 	char tempStr[6];
 	char buffer[20];
 	float temp;
 	static bool tempSource = true;
 
-	float v5 = GetAverageVoltage(V5_SENSOR, VREFSCALE, 5, 10);
-
-	if (tempSource) {
-		temp = GetAverageTemp(TEMP_SENSOR, VREF, 5, 10);
-	}
-	else {
-		temp = DS3231_get_treg() * 1.8 + 32.0;
-	}
-	tempSource = !tempSource;
-
-	FormatVoltage(v5, voltStr, 5, 2);
-	FormatVoltage(temp, tempStr, 5, 1);
-
-	sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
-	lcd.setCursor(0, 0);
-	LcdPrint(lcd, buffer, 20);
+	Serial.println("Waking");
 
 	DS3231_get(&t);
 
-	// display current time
-	snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", t.year_s, t.mon, t.mday, t.hour, t.min, t.sec);
+	float v5 = GetAverageVoltage(V5_SENSOR, VREFSCALE, 5, 10);
 
-	lcd.setCursor(0, 1);
+	//if (tempSource) {
+	//	temp = GetAverageTemp(TEMP_SENSOR, VREF, 5, 10);
+	//}
+	//else {
+		temp = DS3231_get_treg() * 1.8 + 32.0;
+	//}
+	//tempSource = !tempSource;
+
+	FormatFloat(v5, voltStr, 5, 2);
+	FormatFloat(temp, tempStr, 5, 1);
+
+	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
+	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, t.hour, t.min);
+	lcd.setCursor(0, 0);
 	LcdPrint(lcd, buffer, 20);
 
+	// display current time
+	//snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", t.year_s, t.mon, t.mday, t.hour, t.min, t.sec);
 
-	/*
-	  float tReg = DS3231_get_treg() * 1.8 + 32.0;
-	  Serial.print("Temperature is ");
-	  Serial.println(tReg);
-	*/
-
-	//  Serial.print("Temperature is ");
-	//  Serial.println(tempInt);
-	delay(20000);
-	return;
+	//lcd.setCursor(0, 1);
+	//LcdPrint(lcd, buffer, 20);
 }
 
 
@@ -231,6 +287,14 @@ void doBlink(uint8_t ledPin) {
 }
 
 
+void preSleep() {
+	// Send a message just to show we are about to sleep
+	Serial.println("Going to sleep now.");
+	Serial.flush();
+}
+
+
+
 // When WAKE_SLEEP_PIN is brought LOW this interrupt is triggered
 void wakeSleepControlISR() {
 	// Detach the interrupt that brought us here
@@ -248,8 +312,7 @@ void wakeSleepControlISR() {
 // When RTC_WAKE_PIN is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
 void sleepISR() {
 	// Prevent sleep mode, so we don't enter it again, except deliberately, by code
-	sleep_disable()
-		;
+	sleep_disable();
 
 	// Detach the interrupt that brought us out of sleep
 	detachInterrupt(digitalPinToInterrupt(RTC_WAKE_PIN));

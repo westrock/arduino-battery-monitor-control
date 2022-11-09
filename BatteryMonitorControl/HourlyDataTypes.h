@@ -27,26 +27,26 @@
 #include "Arduino.h"
 
 struct currentHourDataStruct {
-  uint8_t   hour;
-  uint8_t   minMinute;
-  uint8_t   maxMinute;
-  uint8_t   samples;
-  uint16_t  vTotal;
-  uint16_t  vMin;
-  uint16_t  vMax;
-  uint16_t  tTotal;
-  uint16_t  tMin;
-  uint16_t  tMax;
+  uint8_t   hour;			// The hour this represents
+  uint8_t   minMinute;		// The minute the vMin was recorded
+  uint8_t   maxMinute;		// The minute the vMax was recorded
+  uint8_t   samples;		// The number of samples
+  uint16_t  vTotal;			// The total of raw voltage readings
+  uint16_t  vMin;			// The minimum raw voltage this hour
+  uint16_t  vMax;			// The maximum raw voltage this hour
+  uint16_t  tTotal;			// The total of raw temperature readings
+  uint16_t  tMin;			// The minimum raw temperature this hour
+  uint16_t  tMax;			// The maximum raw temperature this hour
 };
 typedef struct currentHourDataStruct CurrentHourData;
 
 struct hourlyDataStruct {
-  uint8_t   minMinute;
-  uint8_t   maxMinute;
-  uint16_t  vMin;
-  uint16_t  vMax;
-  uint16_t  tMin;
-  uint16_t  tMax;
+  uint8_t   minMinute;		// The minute the vMin was recorded
+  uint8_t   maxMinute;		// The minute the vMax was recorded
+  uint16_t  vMin;			// The minimum raw voltage this hour
+  uint16_t  vMax;			// The maximum raw voltage this hour
+  uint16_t  tMin;			// The minimum raw temperature this hour
+  uint16_t  tMax;			// The maximum raw temperature this hour
 };
 typedef struct hourlyDataStruct HourlyData;
 

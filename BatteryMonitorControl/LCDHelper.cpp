@@ -34,7 +34,7 @@ uint8_t significantDigits(float floatNum) {
   return count;
 }
 
-void FormatVoltage(float voltage, char *buffer, uint8_t width, uint8_t precis) {
+void FormatFloat(float voltage, char *buffer, uint8_t width, uint8_t precis) {
   uint8_t digits = significantDigits(voltage);
   double  logVoltage;
 

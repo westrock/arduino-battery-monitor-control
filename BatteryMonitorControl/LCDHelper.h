@@ -30,7 +30,7 @@
 
 uint8_t significantDigits(float floatNum);
 
-void FormatVoltage(float voltage, char *buffer, uint8_t width, uint8_t precis);
+void FormatFloat(float voltage, char *buffer, uint8_t width, uint8_t precis);
 
 void LcdPrint(LiquidCrystal lcd, char *text, int padLength);
 
