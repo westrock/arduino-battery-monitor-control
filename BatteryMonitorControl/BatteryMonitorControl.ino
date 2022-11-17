@@ -29,9 +29,11 @@
 #include "Arduino.h"
 #include <avr/sleep.h>
 
+#include "DataAcquisition.h"
 #include "LCDHelper.h"
 #include "HourlyDataTypes.h"
 #include "DS3231Helper.h"
+#include "DataAcquisition.h"
 
 /*========================+
 | #defines                |
@@ -49,50 +51,52 @@
 #define RTC_WAKE_PIN 3                            // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 #define LED_PIN 9                                 // output pin for the LED (to show it is awake)
 
-#define DATA_HOURS      24
-#define BUFF_MAX 256
+#define DISABLE_VOLTAGE		8.9
+#define ENABLE_VOLTAGE		9.0
+#define ENABLE_WAIT_MINUTES	15
+#define DATA_HOURS			24
+#define BUFF_MAX			256
+
+#ifdef DATA_HOURS
+#if !(DATA_HOURS==1 || DATA_HOURS==2 || DATA_HOURS==3 || DATA_HOURS==4 || DATA_HOURS==6 || DATA_HOURS==12 || DATA_HOURS==24)
+#error "DATA_HOURS must be either 1, 2, 3, 4, 6, 12, or 24."
+#endif
+#else
+#error "DATA_HOURS is not defined."
+#endif
 
 /*========================+
   | Local Types            |
   +========================*/
 
-struct vMinMaxTMinMax {
-	uint16_t vMin;
-	uint16_t vMax;
-	uint16_t tMin;
-	uint16_t tMax;
-};
-
-typedef struct vMinMaxTMinMax VMinVMaxTMinTMax;
 
 /*========================+
 | Local Variables         |
 +========================*/
-volatile bool sleepRequested = true;
-volatile bool wakeSleepISRSet = false;
+volatile bool	sleepRequested = true;
+volatile bool	wakeSleepISRSet = false;
 
-uint8_t currentHour;					// The current hour.  Used to store/update samples
-CurrentHourData currentHourData;		// Total, min, and max values for the current hour
-HourlyData hourlyData[DATA_HOURS];		// 
+bool			isPowerOutDisabled = false;
+uint16_t		currentDDD = -1;					// The current day of year.  Used to help caluclate time intervals and evaluate power events
+uint8_t			currentDay = -1;					// The current day.  Used to help caluclate time intervals and evaluate power events
+uint8_t			currentHour = -1;					// The current hour.  Used to store/update samples
+CurrentHourData	currentHourData;					// Total, min, and max values for the current hour
+HourlyData		hourlyData[DATA_HOURS];				//
+DS3231Time		timeDisabled;
 
 
-const uint8_t rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-struct ts t;
-
-VMinVMaxTMinTMax dataPoints[DATA_HOURS];
+const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
+LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
 
 // DS3231 alarm time
 
 /*========================+
 | Function Definitions    |
 +========================*/
-float GetAverageVoltage(uint8_t voltagePin, float voltageScale, uint8_t samples, uint16_t delayMillis);
-float GetAverageTemp(uint8_t tempPin, float tempScale, uint8_t samples, uint16_t delayMillis);
 void doBlink(uint8_t ledPin);
 void sleepISR();
 void preSleep();
-void doWakingTasks();
+void DoWakingTasks();
 
 
 void printCharInHexadecimal(char* str, int len);
@@ -101,13 +105,6 @@ void printCharInHexadecimal(char* str, int len);
 void setup() {
 	// put your setup code here, to run once:
 	Serial.begin(9600);
-
-	for (int hour = 0; hour < DATA_HOURS; hour++) {
-		dataPoints[hour].vMin = 0xFFFF;
-		dataPoints[hour].vMax = 0x0000;
-		dataPoints[hour].tMin = 0xFFFF;
-		dataPoints[hour].tMax = 0x0000;
-	}
 
 	// Set the voltage-monitoring pins
 	pinMode(TEMP_SENSOR, INPUT);
@@ -128,44 +125,28 @@ void setup() {
 	pinMode(LED_PIN, OUTPUT);
 
 	lcd.begin(20, 4);
+	CreateArrows(lcd);
+
 	// Clear the current alarm (puts DS3231 INT high)
 	Wire.begin();
 	DS3231_init(DS3231_CONTROL_INTCN);
 
-	if (!rtcIsRunning()) {
-		Serial.println("DS3231 is NOT running.");
-	}
-
 	DS3231_clear_a1f();
 
-	DS3231_get(&t);
-	prepCurrentHour(&currentHourData, t.hour);
-	prepHourlyData(hourlyData, DATA_HOURS);
+	PrepHourlyData(hourlyData, DATA_HOURS);
 
 	Serial.println("Setup completed.");
-}
 
+	DS3231Time t;
+	getDS3231Time(&t);
 
+	uint16_t dayOfYear = MMDDtoDDD(IS_LEAP_YEAR(t.year), t.mon, t.mday);
 
-float GetAverageTemp(uint8_t tempPin, float tempScale, uint8_t samples, uint16_t delayMillis) {
-	int32_t rawTempSum = 0;
-	uint8_t i;
-	for (i = 0; i < samples; i++) {
-		delay(delayMillis);
-		rawTempSum += analogRead(tempPin);
-	}
-	return rawTempSum / static_cast<float>(samples) * tempScale * 100.0 / 1024.0;
-}
+	Serial.println(t.mday);
+	Serial.println(dayOfYear);
+	Serial.println(t.wday);
 
-
-float GetAverageVoltage(uint8_t voltagePin, float voltageScale, uint8_t samples, uint16_t delayMillis) {
-	int32_t rawVoltageSum = 0;
-	uint8_t i;
-	for (i = 0; i < samples; i++) {
-		delay(delayMillis);
-		rawVoltageSum += analogRead(voltagePin);
-	}
-	return rawVoltageSum / static_cast<float>(samples) * voltageScale;
+	DoWakingTasks();
 }
 
 
@@ -182,6 +163,7 @@ void printCharInHexadecimal(char* str, int len) {
 }
 
 void loop() {
+	DS3231Time t;
 	static byte prevADCSRA;
 	static uint8_t oldSec = 99;
 	char buff[BUFF_MAX];
@@ -209,7 +191,7 @@ void loop() {
 		setAlarmAndSleep(RTC_WAKE_PIN, sleepISR, preSleep, &prevADCSRA, 0, 1, 0);
 		postWakeISRCleanup(&prevADCSRA);
 
-		doWakingTasks();
+		DoWakingTasks();
 	}
 	else
 	{
@@ -229,34 +211,75 @@ void loop() {
 	}
 }
 
-void doWakingTasks() {
+
+void DoWakingTasks() {
+	DS3231Time t;
 	char voltStr[6];
 	char tempStr[6];
 	char buffer[20];
-	float temp;
+	float tempSample;
+	float scaledVoltage;
+	uint16_t rawVoltageSample;
 	static bool tempSource = true;
 
 	Serial.println("Waking");
 
-	DS3231_get(&t);
+	getDS3231Time(&t);
 
-	float v5 = GetAverageVoltage(V5_SENSOR, VREFSCALE, 5, 10);
+	tempSample = GetAverageDS3231Temp(3, 5);
+	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
+	scaledVoltage = rawVoltageSample * VREFSCALE;
 
-	//if (tempSource) {
-	//	temp = GetAverageTemp(TEMP_SENSOR, VREF, 5, 10);
-	//}
-	//else {
-		temp = DS3231_get_treg() * 1.8 + 32.0;
-	//}
-	//tempSource = !tempSource;
+	if (t.hour != currentHour) {
+		if (currentHour != -1) {
+			CloseCurrentHour(hourlyData, &currentHourData, DATA_HOURS % currentHour);
+		}
+		PrepCurrentHour(&currentHourData, &t, &rawVoltageSample, &tempSample);
+		currentHour = t.hour;
+	}
+	else {
+		AddSampleToCurrentHour(&currentHourData, &t, &rawVoltageSample, &tempSample);
+	}
 
-	FormatFloat(v5, voltStr, 5, 2);
-	FormatFloat(temp, tempStr, 5, 1);
+	if (scaledVoltage < DISABLE_VOLTAGE && !isPowerOutDisabled) {
+		if (!isPowerOutDisabled) {
+			isPowerOutDisabled = true;
+			// Open relay
+		}
+		timeDisabled = t;		// Set/Update the most recent time the voltage is below the threshold
+	}
+	else {
+		if (scaledVoltage >= ENABLE_VOLTAGE && isPowerOutDisabled) {
+			isPowerOutDisabled = false;
+			// Close relay
+		}
+	}
+
+	FormatFloat(scaledVoltage, voltStr, 5, 2);
+	FormatFloat(tempSample, tempStr, 5, 1);
 
 	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
 	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, t.hour, t.min);
 	lcd.setCursor(0, 0);
 	LcdPrint(lcd, buffer, 20);
+
+	lcd.setCursor(0, 1);
+	lcd.write((byte)LCD_DOWN_ARROW);
+	lcd.write((byte)LCD_UP_ARROW);
+	
+	sprintf(buffer, "        ");
+	buffer[0] = (byte)LCD_DOWN_ARROW;
+	buffer[2] = (byte)LCD_UP_ARROW;
+	buffer[4] = (byte)LCD_DOWN_ARROW;
+	buffer[6] = (byte)LCD_UP_ARROW;
+	lcd.setCursor(0, 2);
+	lcd.write(buffer, strlen(buffer));
+	//LcdPrint(lcd, buffer, 20);
+
+	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
+	//sprintf(buffer, "%s%c", tempStr, 0xDF);
+	//lcd.setCursor(0, 1);
+	//LcdPrint(lcd, buffer, 20);
 
 	// display current time
 	//snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", t.year_s, t.mon, t.mday, t.hour, t.min, t.sec);
@@ -264,6 +287,8 @@ void doWakingTasks() {
 	//lcd.setCursor(0, 1);
 	//LcdPrint(lcd, buffer, 20);
 }
+
+
 
 
 

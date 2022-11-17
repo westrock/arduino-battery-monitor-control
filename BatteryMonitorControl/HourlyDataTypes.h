@@ -20,11 +20,12 @@
  *
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
-#pragma ONCE
+#pragma once
 #ifndef _HourlyDataTypes_h_
 #define _HourlyDataTypes_h_
 
 #include "Arduino.h"
+#include <ds3231.h>
 
 struct currentHourDataStruct {
   uint8_t   hour;			// The hour this represents
@@ -34,25 +35,35 @@ struct currentHourDataStruct {
   uint16_t  vTotal;			// The total of raw voltage readings
   uint16_t  vMin;			// The minimum raw voltage this hour
   uint16_t  vMax;			// The maximum raw voltage this hour
-  uint16_t  tTotal;			// The total of raw temperature readings
-  uint16_t  tMin;			// The minimum raw temperature this hour
-  uint16_t  tMax;			// The maximum raw temperature this hour
+  float		tTotal;			// The total of raw temperature readings
+  float		tMin;			// The minimum raw temperature this hour
+  float		tMax;			// The maximum raw temperature this hour
 };
 typedef struct currentHourDataStruct CurrentHourData;
 
 struct hourlyDataStruct {
-  uint8_t   minMinute;		// The minute the vMin was recorded
-  uint8_t   maxMinute;		// The minute the vMax was recorded
-  uint16_t  vMin;			// The minimum raw voltage this hour
-  uint16_t  vMax;			// The maximum raw voltage this hour
-  uint16_t  tMin;			// The minimum raw temperature this hour
-  uint16_t  tMax;			// The maximum raw temperature this hour
+	uint8_t		hour;			// The hour this represents
+	uint8_t		minMinute;		// The minute the vMin was recorded
+	uint8_t		maxMinute;		// The minute the vMax was recorded
+	uint16_t	vMin;			// The minimum raw voltage this hour
+	uint16_t	vMax;			// The maximum raw voltage this hour
+	uint16_t	vAvg;			// The average raw voltage this hour
+	float  		tMin;			// The minimum raw temperature this hour
+	float  		tMax;			// The maximum raw temperature this hour
+	float		tAvg;			// The average raw temperature this hour
 };
 typedef struct hourlyDataStruct HourlyData;
 
-void prepCurrentHour(CurrentHourData *hourData, uint8_t hour);
+typedef struct ts DS3231Time;
+
+void PrepCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVoltage, float* temp);
+void AddSampleToCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVoltage, float* temp);
 void prepHourlyDataSlot(HourlyData *hourlyDataSlot);
-void prepHourlyData(HourlyData *firstHourlyDataSlot, uint8_t count);
-void storeCurrentHour(CurrentHourData *hourData, HourlyData *hourlyDataSlot);
+void PrepHourlyData(HourlyData *firstHourlyDataSlot, uint8_t count);
+void CloseCurrentHour(HourlyData* hourlyData, CurrentHourData* currentHourData, uint8_t hourIndex);
+HourlyData* FindMinVoltage(HourlyData* hourSlots, uint8_t count);
+HourlyData* FindMinTemp(HourlyData* hourSlots, uint8_t count);
+HourlyData* FindMaxVoltage(HourlyData* hourSlots, uint8_t count);
+HourlyData* FindMaxTemp(HourlyData* hourSlots, uint8_t count);
 
 #endif

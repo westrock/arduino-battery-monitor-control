@@ -20,22 +20,26 @@
  *
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
-#pragma once
-#ifndef LCDHelper_h
-#define LCDHelper_h
+#pragma ONCE
+
+#ifndef _LCDHelper_h
+#define _LCDHelper_h
+
+#include "arduino.h"
 
 #include <LiquidCrystal.h>
-#include "Arduino.h"
 
-#define LCD_DOWN_ARROW	1
-#define LCD_UP_ARROW	2
+#define LCD_DOWN_ARROW	0
+#define LCD_UP_ARROW	1
 
 uint8_t significantDigits(float floatNum);
 
 void CreateArrows(LiquidCrystal lcd);
 
-void FormatFloat(float voltage, char *buffer, uint8_t width, uint8_t precis);
+void FormatFloat(float voltage, char* buffer, uint8_t width, uint8_t precis);
 
-void LcdPrint(LiquidCrystal lcd, char *text, int padLength);
+void LcdPrint(LiquidCrystal lcd, char* text, int padLength);
 
 #endif
+
+

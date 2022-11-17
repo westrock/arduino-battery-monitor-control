@@ -15,42 +15,18 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="BatteryMonitorControl.ino" />
+    <None Include="LCDTests.ino" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="__vm\.BatteryMonitorControl.vsarduino.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="DS3231Helper.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="HourlyDataTypes.h">
+    <ClInclude Include="__vm\.LCDTests.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="LCDHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DataAcquisition.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="DateTimeHelpers.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="DS3231Helper.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="HourlyDataTypes.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="LCDHelper.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="DataAcquisition.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="DateTimeHelpers.cpp">
+    <ClCompile Include="LCDHelper.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
