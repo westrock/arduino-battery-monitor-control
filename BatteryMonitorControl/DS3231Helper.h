@@ -25,28 +25,17 @@
 #define _DS3231Helper_h_
 
 #include "Arduino.h"
-#include <config.h>
-#include <ds3231.h>
+#include "config.h"
+#include "ds3231.h"
 #include <Wire.h>
 
 typedef struct ts DS3231Time;
 
-#define IS_LEAP_YEAR(y) ((y % 400 == 0) || (y % 100 != 0) && (y % 4 == 0))
-
-DS3231Time getDS3231Time(DS3231Time* time);
 
 void setAlarmAndSleep(uint8_t wakePin, void (*wakeISR)(), void (*preSleepAction)(), byte *prevADCSRA, uint8_t wakeInHours, uint8_t wakeInMinutes, uint8_t wakeInSeconds);
 
 void setNextAlarm(uint8_t wakeInHours, uint8_t wakeInMinutes, uint8_t wakeInSeconds);
 
 void postWakeISRCleanup(byte *prevADCSRA);
-
-int32_t ElapsedMinutes(DS3231Time* pCurDayTime, uint16_t* pCurDayOfYear, DS3231Time* pTgtDayTime, uint16_t* pTgtDayOfYear);
-
-int32_t DateDiff(DS3231Time* pCurDayTime, uint16_t* pCurDayOfYear, DS3231Time* pTgtDayTime, uint16_t* pTgtDayOfYear);
-
-void DDDtoMMDD(bool isLeapYear, int16_t dayOfYear, int8_t* mm, int8_t* dd);
-
-uint16_t MMDDtoDDD(bool isLeapYear, int8_t mm, int8_t dd);
 
 #endif

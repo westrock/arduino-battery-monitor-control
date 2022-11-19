@@ -2,8 +2,8 @@
 // 
 // 
 
-#include <config.h>
-#include <ds3231.h>
+#include "config.h"
+#include "ds3231.h"
 #include "DataAcquisition.h"
 
 

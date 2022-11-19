@@ -34,8 +34,8 @@ uint8_t significantDigits(float floatNum);
 
 void CreateArrows(LiquidCrystal lcd);
 
-void FormatFloat(float voltage, char *buffer, uint8_t width, uint8_t precis);
+void formatFloat(float voltage, char *buffer, uint8_t width, uint8_t precis);
 
-void LcdPrint(LiquidCrystal lcd, char *text, int padLength);
+void lcdPrint(LiquidCrystal lcd, char *text, int padLength);
 
 #endif

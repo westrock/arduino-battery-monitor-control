@@ -22,21 +22,8 @@
  */
 
 #include "DS3231Helper.h"
-#include <ds3231.h>
+#include "ds3231.h"
 #include <avr/sleep.h>
-
-static const uint16_t _CommonMonthDays[13] = { 0,31,59,90,120,151,181,212,243,273,304,334,365 };   // Common cumulative days per month.
-static const uint16_t _LeapMonthDays[13] = { 0,31,60,91,121,152,182,213,244,274,305,335,366 };    // Leap cumulative days per month.
-
-
-DS3231Time getDS3231Time(DS3231Time* time)
-{
-    DS3231_get(time);
-    if (time->year < 2000) {
-        time->year = 2000 + time->year_s;
-    }
-}
-
 
 
 // Set the next alarm
@@ -148,72 +135,3 @@ void postWakeISRCleanup(byte *prevADCSRA) {
   ADCSRA = *prevADCSRA;
 }
 
-
-
-int32_t ElapsedMinutes(DS3231Time* pCurDayTime, uint16_t* pCurDayOfYear, DS3231Time* pTgtDayTime, uint16_t* pTgtDayOfYear) {
-    DateDiff(pCurDayTime, pCurDayOfYear, pTgtDayTime, pTgtDayOfYear) / 60;
-}
-
-
-int32_t DateDiff(DS3231Time* pCurDayTime, uint16_t* pCurDayOfYear, DS3231Time* pTgtDayTime, uint16_t* pTgtDayOfYear)
-{
-    int32_t	seconds = 0;
-
-    seconds = pCurDayTime->sec - pTgtDayTime->sec;
-    seconds += (pCurDayTime->min - pTgtDayTime->min) * 60;
-
-    // Shortcutting calculations below to skip unneccessary arithmetic
-    if (pCurDayTime->hour != pTgtDayTime->hour) {
-        seconds += (pCurDayTime->hour - pTgtDayTime->hour) * 60 * 60;
-    }
-    if (*pCurDayOfYear != *pTgtDayOfYear) {
-        seconds += (*pCurDayOfYear - *pTgtDayOfYear) * 24 * 60 * 60;
-    }
-    if (pCurDayTime->year != pTgtDayTime->year) {
-        // I am being sloppy here w.r.t. leap years.  So sue me
-        seconds += (pCurDayTime->year - pTgtDayTime->year) * 365 * 24 * 60 * 60;
-    }
-
-    return seconds;
-}
-
-
-
-/*
-    Params:
-        dayOfYear       The one-based day of the year
-        *mm             The zero-based corresponding month
-        *dd             The corresponding day of the month
-*/
-void DDDtoMMDD(bool isLeapYear, int16_t dayOfYear, int8_t* mm, int8_t* dd)
-{
-    int8_t  i = 1;
-    const uint16_t* monthDays = (isLeapYear ? _LeapMonthDays : _CommonMonthDays);
-
-    while ((dayOfYear > monthDays[i]) && (i < 11))
-    {
-        i++;
-    }
-    *dd = dayOfYear - monthDays[i - 1];
-    *mm = i;
-}
-
-/*
-    Params:
-        isLeapYear      If true it's a leap year
-        mm              The 1-based  month
-        dd              The corresponding day of the month
-    Returns:
-        dayOfYear       The one-based day of the year
-*/
-uint16_t MMDDtoDDD(bool isLeapYear, int8_t mm, int8_t dd)
-{
-    return (mm < 1 || mm > 12) ? -1 : (isLeapYear ? _LeapMonthDays[mm - 1] : _CommonMonthDays[mm - 1]) + dd;
-}
-
-
-
-uint16_t DS3231Time_MMDDtoDDD(DS3231Time* pCurDayTime)
-{
-    return MMDDtoDDD(IS_LEAP_YEAR(pCurDayTime->year), pCurDayTime->mon, pCurDayTime->mday);
-}

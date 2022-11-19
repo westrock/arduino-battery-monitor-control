@@ -25,7 +25,7 @@
 #define _HourlyDataTypes_h_
 
 #include "Arduino.h"
-#include <ds3231.h>
+#include "ds3231.h"
 
 struct currentHourDataStruct {
   uint8_t   hour;			// The hour this represents
@@ -54,10 +54,8 @@ struct hourlyDataStruct {
 };
 typedef struct hourlyDataStruct HourlyData;
 
-typedef struct ts DS3231Time;
-
-void PrepCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVoltage, float* temp);
-void AddSampleToCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVoltage, float* temp);
+void PrepCurrentHour(CurrentHourData* hourData, DateTimeDS3231* t, uint16_t* rawVoltage, float* temp);
+void AddSampleToCurrentHour(CurrentHourData* hourData, DateTimeDS3231* t, uint16_t* rawVoltage, float* temp);
 void prepHourlyDataSlot(HourlyData *hourlyDataSlot);
 void PrepHourlyData(HourlyData *firstHourlyDataSlot, uint8_t count);
 void CloseCurrentHour(HourlyData* hourlyData, CurrentHourData* currentHourData, uint8_t hourIndex);

@@ -22,12 +22,12 @@
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
 
-#include <config.h>
-#include <ds3231.h>
 #include <Wire.h>
 #include <LiquidCrystal.h>
 #include "Arduino.h"
 #include <avr/sleep.h>
+#include "ds3231.h"
+#include "config.h"
 
 #include "DataAcquisition.h"
 #include "LCDHelper.h"
@@ -38,7 +38,7 @@
 /*========================+
 | #defines                |
 +========================*/
-#define VDIV_SCALE 4.555                          //
+#define VDIV_SCALE 4.50045                          //
 #define VREG 5.0                                  //
 #define VREF_RESISTOR 7.7                         //
 #define VREF VREG * 32 / (32 + VREF_RESISTOR)     //
@@ -53,7 +53,7 @@
 
 #define DISABLE_VOLTAGE		8.9
 #define ENABLE_VOLTAGE		9.0
-#define ENABLE_WAIT_MINUTES	15
+#define ENABLE_WAIT_MINUTES	5
 #define DATA_HOURS			24
 #define BUFF_MAX			256
 
@@ -76,13 +76,15 @@
 volatile bool	sleepRequested = true;
 volatile bool	wakeSleepISRSet = false;
 
-bool			isPowerOutDisabled = false;
-uint16_t		currentDDD = -1;					// The current day of year.  Used to help caluclate time intervals and evaluate power events
-uint8_t			currentDay = -1;					// The current day.  Used to help caluclate time intervals and evaluate power events
+bool			isPowerOutDisabled = false;			// Indicates the power out has been disabled (the relay is open)
+bool			isPowerOutRecovering = false;		// Indicates the power is recovering (the relay is still open)
+uint16_t		currentDDD = -1;					// The current day of year.  Used to help calculate time intervals and evaluate power events
+uint8_t			currentDay = -1;					// The current day.  Used to help calculate time intervals and evaluate power events
 uint8_t			currentHour = -1;					// The current hour.  Used to store/update samples
 CurrentHourData	currentHourData;					// Total, min, and max values for the current hour
 HourlyData		hourlyData[DATA_HOURS];				//
-DS3231Time		timeDisabled;
+DS3231Time		timeDisabled;						// The time the voltage initially dropped below the low threshold 
+DS3231Time		timeRecoveryStarted;				// The time the voltage started to rebound
 
 
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
@@ -138,12 +140,10 @@ void setup() {
 	Serial.println("Setup completed.");
 
 	DS3231Time t;
-	getDS3231Time(&t);
-
-	uint16_t dayOfYear = MMDDtoDDD(IS_LEAP_YEAR(t.year), t.mon, t.mday);
+	DS3231_get(&t);
 
 	Serial.println(t.mday);
-	Serial.println(dayOfYear);
+	Serial.println(t.yday);
 	Serial.println(t.wday);
 
 	DoWakingTasks();
@@ -220,11 +220,12 @@ void DoWakingTasks() {
 	float tempSample;
 	float scaledVoltage;
 	uint16_t rawVoltageSample;
+	uint16_t minutesDisabled;
 	static bool tempSource = true;
 
 	Serial.println("Waking");
 
-	getDS3231Time(&t);
+	DS3231_get(&t);
 
 	tempSample = GetAverageDS3231Temp(3, 5);
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
@@ -241,29 +242,49 @@ void DoWakingTasks() {
 		AddSampleToCurrentHour(&currentHourData, &t, &rawVoltageSample, &tempSample);
 	}
 
-	if (scaledVoltage < DISABLE_VOLTAGE && !isPowerOutDisabled) {
+	if (scaledVoltage < DISABLE_VOLTAGE) {
 		if (!isPowerOutDisabled) {
 			isPowerOutDisabled = true;
+			isPowerOutRecovering = false;
+			timeDisabled = t;		// Set the time the voltage dropped below the threshold
+			minutesDisabled = 0;
 			// Open relay
 		}
-		timeDisabled = t;		// Set/Update the most recent time the voltage is below the threshold
-	}
-	else {
-		if (scaledVoltage >= ENABLE_VOLTAGE && isPowerOutDisabled) {
-			isPowerOutDisabled = false;
-			// Close relay
+		else {
+			minutesDisabled = elapsedMinutes(&t, &timeRecoveryStarted);
 		}
 	}
 
-	FormatFloat(scaledVoltage, voltStr, 5, 2);
-	FormatFloat(tempSample, tempStr, 5, 1);
+	if (scaledVoltage >= ENABLE_VOLTAGE && isPowerOutDisabled) {
+		if (!isPowerOutRecovering) {
+			isPowerOutRecovering = true;
+			timeRecoveryStarted = t;
+		}
+		else {
+			if (elapsedMinutes(&t, &timeRecoveryStarted) >= ENABLE_WAIT_MINUTES) {
+				isPowerOutDisabled = false;
+				isPowerOutRecovering = false;
+				// Close relay
+			}
+		}
+	}
+
+	formatFloat(scaledVoltage, voltStr, 5, 2);
+	formatFloat(tempSample, tempStr, 5, 1);
 
 	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
 	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, t.hour, t.min);
 	lcd.setCursor(0, 0);
-	LcdPrint(lcd, buffer, 20);
+	lcdPrint(lcd, buffer, 20);
 
 	lcd.setCursor(0, 1);
+	if (isPowerOutDisabled) {
+		sprintf(buffer, "Power off %d mins", minutesDisabled);
+		lcdPrint(lcd, buffer, 20);
+	}
+	else {
+		strcpy(buffer, "Power ON");
+	}
 	lcd.write((byte)LCD_DOWN_ARROW);
 	lcd.write((byte)LCD_UP_ARROW);
 	
@@ -274,18 +295,18 @@ void DoWakingTasks() {
 	buffer[6] = (byte)LCD_UP_ARROW;
 	lcd.setCursor(0, 2);
 	lcd.write(buffer, strlen(buffer));
-	//LcdPrint(lcd, buffer, 20);
+	//lcdPrint(lcd, buffer, 20);
 
 	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
 	//sprintf(buffer, "%s%c", tempStr, 0xDF);
 	//lcd.setCursor(0, 1);
-	//LcdPrint(lcd, buffer, 20);
+	//lcdPrint(lcd, buffer, 20);
 
 	// display current time
 	//snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", t.year_s, t.mon, t.mday, t.hour, t.min, t.sec);
 
 	//lcd.setCursor(0, 1);
-	//LcdPrint(lcd, buffer, 20);
+	//lcdPrint(lcd, buffer, 20);
 }
 
 

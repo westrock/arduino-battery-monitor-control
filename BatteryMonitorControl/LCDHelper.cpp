@@ -34,7 +34,7 @@ uint8_t significantDigits(float floatNum) {
 	return count;
 }
 
-void FormatFloat(float voltage, char* buffer, uint8_t width, uint8_t precis) {
+void formatFloat(float voltage, char* buffer, uint8_t width, uint8_t precis) {
 	uint8_t digits = significantDigits(voltage);
 	double  logVoltage;
 
@@ -47,7 +47,7 @@ void FormatFloat(float voltage, char* buffer, uint8_t width, uint8_t precis) {
 	}
 }
 
-void LcdPrint(LiquidCrystal lcd, char* text, int padLength) {
+void lcdPrint(LiquidCrystal lcd, char* text, int padLength) {
 	int textLength = strlen(text);
 	int neededPadding;
 

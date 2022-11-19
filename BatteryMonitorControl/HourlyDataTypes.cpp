@@ -23,7 +23,7 @@
 #include "HourlyDataTypes.h"
 
 
-void PrepCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVoltage, float* temp) {
+void PrepCurrentHour(CurrentHourData* hourData, DateTimeDS3231* t, uint16_t* rawVoltage, float* temp) {
 	hourData->samples = 1;
 	hourData->hour = t->hour;
 	hourData->minMinute = t->min;
@@ -37,7 +37,7 @@ void PrepCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVolt
 }
 
 
-void AddSampleToCurrentHour(CurrentHourData* hourData, DS3231Time* t, uint16_t* rawVoltage, float* temp) {
+void AddSampleToCurrentHour(CurrentHourData* hourData, DateTimeDS3231* t, uint16_t* rawVoltage, float* temp) {
 
 	hourData->samples++;
 	hourData->vTotal += *rawVoltage;
