@@ -50,19 +50,22 @@
 	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
 #endif
 
-#define TEMP_SENSOR A0                            // An LM34 thermometer
-#define V5_SENSOR A1                              // This pin measures the VREF-limited external (battery) voltage
-#define VBATT_RELAY 4                             // This relay allows current to flow in to the pin at V5_SENSOR
+#define TEMP_SENSOR A0								// An LM34 thermometer
+#define V5_SENSOR A1								// This pin measures the VREF-limited external (battery) voltage
+#define VBATT_RELAY 9								// This relay allows current to flow in to the pin at V5_SENSOR
 
-#define WAKE_SLEEP_PIN 2                                // When low, makes 328P go to sleep
-#define RTC_WAKE_PIN 3                            // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
-#define LED_PIN 9                                 // output pin for the LED (to show it is awake)
+#define WAKE_SLEEP_PIN 2							// When low, makes 328P go to sleep
+#define RTC_WAKE_PIN 3								// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define LED_PIN 4									// output pin for the LED (to show it is awake)
 
-#define DISABLE_VOLTAGE		11.25
-#define ENABLE_VOLTAGE		11.30
-#define ENABLE_WAIT_MINUTES	5
-#define DATA_HOURS			24
-#define BUFF_MAX			256
+#define DISABLE_VOLTAGE			11.25
+#define ENABLE_VOLTAGE			11.30
+#define ENABLE_WAIT_MINUTES		2					// <<---- 
+#define DATA_HOURS				24
+#define BUFF_MAX				256
+#define REPORTING_DELAY_SECONDS	6
+
+enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOfReports};
 
 #ifdef DATA_HOURS
 	#if !(DATA_HOURS==1 || DATA_HOURS==2 || DATA_HOURS==3 || DATA_HOURS==4 || DATA_HOURS==6 || DATA_HOURS==12 || DATA_HOURS==24)
@@ -71,9 +74,6 @@
 	#else
 		#error "DATA_HOURS is not defined."
 #endif
-
-#define OPEN_RELAY(pin) (digitalWrite(pin, LOW))
-#define CLOSE_RELAY(pin) (digitalWrite(pin, HIGH))
 
 /*========================+
 | Local Types            |
@@ -110,6 +110,31 @@ void doBlink(uint8_t ledPin);
 void sleepISR();
 void preSleep();
 void DoWakingTasks();
+
+void OPEN_RELAY(uint8_t pin);
+void CLOSE_RELAY(uint8_t pin);
+
+void OPEN_RELAY(uint8_t pin)
+{
+	Serial.println("opening relay");
+	for (int i = 254; i > 0; i--)
+	{
+		analogWrite(pin, i);
+		delay(4);
+	}
+	digitalWrite(pin, LOW);
+}
+
+void CLOSE_RELAY(uint8_t pin)
+{
+	Serial.println("closing relay");
+	for (int i = 0; i < 255; i++)
+	{
+		analogWrite(pin, i);
+		delay(4);
+	}
+	digitalWrite(pin, HIGH);
+}
 
 
 void printCharInHexadecimal(char* str, int len);
@@ -176,10 +201,12 @@ void printCharInHexadecimal(char* str, int len) {
 	Serial.println();
 }
 
-void loop() {
-	DS3231Time t;
+
+void loop()
+{
+	static int reportingCycle = FirstReport;
+	static DS3231Time previousTime = GetTime();
 	static byte prevADCSRA;
-	static uint8_t oldSec = 99;
 	char buff[BUFF_MAX];
 
 	if (!wakeSleepISRSet) {
@@ -193,11 +220,7 @@ void loop() {
 	// Just blink LED twice to show we're running
 	doBlink(LED_PIN);
 
-	//  if (digitalRead(WAKE_SLEEP_PIN) == LOW) {
-	//    sleepRequested = !sleepRequested;
-	//  }
-
-	// Is the "go to sleep" pin now LOW?
+	// Has the button on the "go to sleep" pin been toggled?
 	if (sleepRequested)
 	{
 		Serial.println("sleep REQUESTED");
@@ -209,18 +232,47 @@ void loop() {
 	}
 	else
 	{
-		// Get the time
-		DS3231_get(&t);
+		DS3231Time timeNow;
 
-		// If the seconds has changed, display the (new) time
-		if (t.sec != oldSec)
+		DS3231_get(&timeNow);
+		int32_t secondsElapsed = dateDiffSeconds(&timeNow, &previousTime);
+
+		if (secondsElapsed > REPORTING_DELAY_SECONDS)
 		{
-			// display current time
-			snprintf(buff, BUFF_MAX, "%d.%02d.%02d %02d:%02d:%02d\n", t.year,
-				t.mon, t.mday, t.hour, t.min, t.sec);
-			Serial.print(buff);
-			Serial.println(t.year);
-			oldSec = t.sec;
+			previousTime = timeNow;
+			lcd.clear();
+			switch (reportingCycle)
+			{
+			case Report0:
+				lcd.setCursor(0, 1);
+				if (isPowerOutDisabled)
+				{
+					lcdPrint(lcd, "Power Off", 20);
+				}
+				else {
+					lcdPrint(lcd, "Power On", 20);
+				}
+				break;
+			case Report1:
+				lcd.setCursor(0, 1);
+				lcdPrint(lcd, "reportingCycle 1", 20);
+				break;
+			case Report2:
+				lcd.setCursor(0, 1);
+				lcdPrint(lcd, "reportingCycle 2", 20);
+				break;
+			case Report3:
+				lcd.setCursor(0, 1);
+				lcdPrint(lcd, "reportingCycle 3", 20);
+				break;
+			default:
+				break;
+			}
+			reportingCycle++;
+			if (reportingCycle >= EndOfReports)
+			{
+				reportingCycle = FirstReport;
+			}
 		}
 	}
 }
@@ -275,12 +327,12 @@ void DoWakingTasks() {
 		{
 			isPowerOutRecovering = true;
 			recoveryTime = timeNow;
-			addMinutes(&recoveryTime, 5);
+			addMinutes(&recoveryTime, ENABLE_WAIT_MINUTES);
 			timeRecoveryStarted = timeNow;
 		}
 		else
 		{
-			if (dateDiffMinutes(&timeNow, &timeRecoveryStarted) >= ENABLE_WAIT_MINUTES)
+			if (dateDiffSeconds(&timeNow, &timeRecoveryStarted) >= ENABLE_WAIT_MINUTES * 60)
 			{
 				if (timeDisabled.hour == timeNow.hour)
 				{

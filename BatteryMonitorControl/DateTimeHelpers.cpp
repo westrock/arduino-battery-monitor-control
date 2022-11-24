@@ -23,6 +23,24 @@
 #include "DateTimeHelpers.h"
 
 
+DateTimeDS3231 GetTime()
+{
+	DateTimeDS3231 timeNow;
+
+	DS3231_get(&timeNow);
+	return timeNow;
+}
+
+
+int32_t dateDiffSecondsSinceNow(DateTimeDS3231* pTgtDayTime)
+{
+	DateTimeDS3231 timeNow;
+
+	DS3231_get(&timeNow);
+	return dateDiffSeconds(&timeNow, pTgtDayTime);
+}
+
+
 int32_t dateDiffMinutes(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime)
 {
 	return dateDiffSeconds(pCurDayTime, pTgtDayTime) / 60;

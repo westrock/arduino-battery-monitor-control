@@ -40,6 +40,9 @@ struct elapsedTimeStruct {
 };
 typedef struct elapsedTimeStruct ElapsedTime;
 
+
+DateTimeDS3231 GetTime();
+int32_t dateDiffSecondsSinceNow(DateTimeDS3231* pTgtDayTime);
 int32_t dateDiffMinutes(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime);
 int32_t dateDiffSeconds(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime);
 ElapsedTime dateDiff(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime);
