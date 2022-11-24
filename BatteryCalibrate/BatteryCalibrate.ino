@@ -12,18 +12,25 @@
 /*========================+
 | #defines                |
 +========================*/
-#define VDIV_SCALE 4.50045                          //
-#define VREG 5.0                                  //
-#define VREF_RESISTOR 7.7                         //
-#define VREF VREG * 32 / (32 + VREF_RESISTOR)     //
-#define VREFSCALE VREF / 1024.0 * VDIV_SCALE      //
-#define TEMP_SENSOR A0                            // An LM34 thermometer
-#define V5_SENSOR A1                              // This pin measures the VREF-limited external (battery) voltage
-#define VBATT_RELAY 4                             // This relay allows current to flow in to the pin at V5_SENSOR
 
-#define WAKE_SLEEP_PIN 2                                // When low, makes 328P go to sleep
-#define RTC_WAKE_PIN 3                            // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
-#define LED_PIN 9                                 // output pin for the LED (to show it is awake)
+#define VDIV_SCALE 4.588694								//
+#define VREG 5.0										//
+
+#ifdef USE_EXTERNALVREF
+	#define VREF_RESISTOR 7.7							//
+	#define VREF VREG * 32 / (32 + VREF_RESISTOR)		//
+	#define VREFSCALE VREF / 1024.0 * VDIV_SCALE		//
+#else
+	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
+#endif
+
+#define TEMP_SENSOR A0									// An LM34 thermometer
+#define V5_SENSOR A1									// This pin measures the VREF-limited external (battery) voltage
+#define VBATT_RELAY 4									// This relay allows current to flow in to the pin at V5_SENSOR
+
+#define WAKE_SLEEP_PIN 2								// When low, makes 328P go to sleep
+#define RTC_WAKE_PIN 3									// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define LED_PIN 9										// output pin for the LED (to show it is awake)
 
 #define DISABLE_VOLTAGE		8.9
 #define ENABLE_VOLTAGE		9.0
@@ -93,7 +100,11 @@ void setup() {
 	digitalWrite(VBATT_RELAY, HIGH);
 	delay(100);
 
+#ifdef USE_EXTERNALVREF
 	analogReference(EXTERNAL);
+#else
+	analogReference(DEFAULT);
+#endif
 
 	Serial.println("Setup completed.");
 
@@ -122,9 +133,10 @@ void loop() {
 	uint16_t rawVoltageSample;
 	uint16_t minutesDisabled;
 	static bool tempSource = true;
+	static bool relayOpen = true;
 
 
-	tempSample = GetAverageTemp(TEMP_SENSOR, VREFSCALE, 3, 5);
+	tempSample = GetAverageTemp(TEMP_SENSOR, VREFSCALE, 10, 10);
 
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
 	scaledVoltage = rawVoltageSample * VREFSCALE;
@@ -136,6 +148,9 @@ void loop() {
 	sprintf(buffer, "%sv %s%c", voltStr, tempStr);
 	lcd.setCursor(0, 0);
 	lcdPrint(lcd, buffer, 20);
+
+	digitalWrite(VBATT_RELAY, relayOpen ? HIGH : LOW);
+	relayOpen = !relayOpen;
 
 	delay(250);
 }

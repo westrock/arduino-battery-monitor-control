@@ -26,6 +26,7 @@
 void PrepCurrentHour(CurrentHourData* hourData, DateTimeDS3231* t, uint16_t* rawVoltage, float* temp) {
 	hourData->samples = 1;
 	hourData->hour = t->hour;
+	hourData->downMinutes = 0;
 	hourData->minMinute = t->min;
 	hourData->maxMinute = t->min;
 	hourData->vTotal = *rawVoltage;
@@ -68,6 +69,7 @@ void AddSampleToCurrentHour(CurrentHourData* hourData, DateTimeDS3231* t, uint16
 
 void prepHourlyDataSlot(HourlyData* hourlyDataSlot) {
 	hourlyDataSlot->hour = 0xFF;
+	hourlyDataSlot->downMinutes = 0;
 	hourlyDataSlot->minMinute = 0;
 	hourlyDataSlot->maxMinute = 0;
 	hourlyDataSlot->vMin = 0xFFFF;
@@ -89,6 +91,7 @@ void PrepHourlyData(HourlyData* firstHourlyDataSlot, uint8_t count) {
 void CloseCurrentHour(HourlyData* hourlyData, CurrentHourData* currentHourData, uint8_t hourIndex) {
 	// Finalize Current Hour, save in Hourly Data
 	hourlyData[hourIndex].hour = currentHourData->hour;
+	hourlyData[hourIndex].downMinutes = currentHourData->downMinutes;
 	hourlyData[hourIndex].minMinute = currentHourData->minMinute;
 	hourlyData[hourIndex].maxMinute = currentHourData->maxMinute;
 	hourlyData[hourIndex].vMin = currentHourData->vMin;

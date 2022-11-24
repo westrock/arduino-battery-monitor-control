@@ -33,16 +33,23 @@
 #include "LCDHelper.h"
 #include "HourlyDataTypes.h"
 #include "DS3231Helper.h"
+#include "DateTimeHelpers.h"
 #include "DataAcquisition.h"
 
 /*========================+
 | #defines                |
 +========================*/
-#define VDIV_SCALE 4.50045                          //
-#define VREG 5.0                                  //
-#define VREF_RESISTOR 7.7                         //
-#define VREF VREG * 32 / (32 + VREF_RESISTOR)     //
-#define VREFSCALE VREF / 1024.0 * VDIV_SCALE      //
+#define VDIV_SCALE 4.588694								//
+#define VREG 5.0										//
+
+#ifdef USE_EXTERNALVREF
+	#define VREF_RESISTOR 7.7							//
+	#define VREF VREG * 32 / (32 + VREF_RESISTOR)		//
+	#define VREFSCALE VREF / 1024.0 * VDIV_SCALE		//
+#else
+	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
+#endif
+
 #define TEMP_SENSOR A0                            // An LM34 thermometer
 #define V5_SENSOR A1                              // This pin measures the VREF-limited external (battery) voltage
 #define VBATT_RELAY 4                             // This relay allows current to flow in to the pin at V5_SENSOR
@@ -51,23 +58,26 @@
 #define RTC_WAKE_PIN 3                            // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 #define LED_PIN 9                                 // output pin for the LED (to show it is awake)
 
-#define DISABLE_VOLTAGE		8.9
-#define ENABLE_VOLTAGE		9.0
+#define DISABLE_VOLTAGE		11.25
+#define ENABLE_VOLTAGE		11.30
 #define ENABLE_WAIT_MINUTES	5
 #define DATA_HOURS			24
 #define BUFF_MAX			256
 
 #ifdef DATA_HOURS
-#if !(DATA_HOURS==1 || DATA_HOURS==2 || DATA_HOURS==3 || DATA_HOURS==4 || DATA_HOURS==6 || DATA_HOURS==12 || DATA_HOURS==24)
-#error "DATA_HOURS must be either 1, 2, 3, 4, 6, 12, or 24."
-#endif
-#else
-#error "DATA_HOURS is not defined."
+	#if !(DATA_HOURS==1 || DATA_HOURS==2 || DATA_HOURS==3 || DATA_HOURS==4 || DATA_HOURS==6 || DATA_HOURS==12 || DATA_HOURS==24)
+		#error "DATA_HOURS must be either 1, 2, 3, 4, 6, 12, or 24."
+	#endif
+	#else
+		#error "DATA_HOURS is not defined."
 #endif
 
+#define OPEN_RELAY(pin) (digitalWrite(pin, LOW))
+#define CLOSE_RELAY(pin) (digitalWrite(pin, HIGH))
+
 /*========================+
-  | Local Types            |
-  +========================*/
+| Local Types            |
++========================*/
 
 
 /*========================+
@@ -85,6 +95,7 @@ CurrentHourData	currentHourData;					// Total, min, and max values for the curre
 HourlyData		hourlyData[DATA_HOURS];				//
 DS3231Time		timeDisabled;						// The time the voltage initially dropped below the low threshold 
 DS3231Time		timeRecoveryStarted;				// The time the voltage started to rebound
+DateTimeDS3231	recoveryTime;						// The time recovery will be completed
 
 
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
@@ -117,10 +128,14 @@ void setup() {
 
 	// Set the VREF basis to the external value
 	// and allow voltage to come in.
-	digitalWrite(VBATT_RELAY, HIGH);
+	CLOSE_RELAY(VBATT_RELAY);
 	delay(100);
 
+#ifdef USE_EXTERNALVREF
 	analogReference(EXTERNAL);
+#else
+	analogReference(DEFAULT);
+#endif
 
 	// Flashing LED just to show the �Controller is running
 	digitalWrite(LED_PIN, LOW);
@@ -139,12 +154,11 @@ void setup() {
 
 	Serial.println("Setup completed.");
 
-	DS3231Time t;
-	DS3231_get(&t);
-
-	Serial.println(t.mday);
-	Serial.println(t.yday);
-	Serial.println(t.wday);
+	for (int i = 0; i < 100; i++)
+	{
+		doBlink(LED_PIN);
+		delay(5);
+	}
 
 	DoWakingTasks();
 }
@@ -188,7 +202,7 @@ void loop() {
 	{
 		Serial.println("sleep REQUESTED");
 
-		setAlarmAndSleep(RTC_WAKE_PIN, sleepISR, preSleep, &prevADCSRA, 0, 1, 0);
+		setAlarmAndSleep(RTC_WAKE_PIN, sleepISR, preSleep, &prevADCSRA, 0, 0, 10);	// 0, 1, 0
 		postWakeISRCleanup(&prevADCSRA);
 
 		DoWakingTasks();
@@ -213,87 +227,134 @@ void loop() {
 
 
 void DoWakingTasks() {
-	DS3231Time t;
+	DS3231Time timeNow;
 	char voltStr[6];
 	char tempStr[6];
 	char buffer[20];
 	float tempSample;
 	float scaledVoltage;
 	uint16_t rawVoltageSample;
-	uint16_t minutesDisabled;
+	uint16_t minutesDisabled = 0;
 	static bool tempSource = true;
 
 	Serial.println("Waking");
 
-	DS3231_get(&t);
+	DS3231_get(&timeNow);
 
 	tempSample = GetAverageDS3231Temp(3, 5);
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
 	scaledVoltage = rawVoltageSample * VREFSCALE;
 
-	if (t.hour != currentHour) {
-		if (currentHour != -1) {
-			CloseCurrentHour(hourlyData, &currentHourData, DATA_HOURS % currentHour);
-		}
-		PrepCurrentHour(&currentHourData, &t, &rawVoltageSample, &tempSample);
-		currentHour = t.hour;
-	}
-	else {
-		AddSampleToCurrentHour(&currentHourData, &t, &rawVoltageSample, &tempSample);
-	}
-
 	if (scaledVoltage < DISABLE_VOLTAGE) {
-		if (!isPowerOutDisabled) {
-			isPowerOutDisabled = true;
-			isPowerOutRecovering = false;
-			timeDisabled = t;		// Set the time the voltage dropped below the threshold
-			minutesDisabled = 0;
-			// Open relay
-		}
-		else {
-			minutesDisabled = elapsedMinutes(&t, &timeRecoveryStarted);
-		}
-	}
+		if (!isPowerOutDisabled || isPowerOutRecovering)
+		{
+			if (!isPowerOutDisabled)
+			{
+				isPowerOutDisabled = true;
+				timeDisabled = timeNow;		// Set the time the voltage dropped below the threshold
+				OPEN_RELAY(VBATT_RELAY);
+			}
 
-	if (scaledVoltage >= ENABLE_VOLTAGE && isPowerOutDisabled) {
-		if (!isPowerOutRecovering) {
-			isPowerOutRecovering = true;
-			timeRecoveryStarted = t;
-		}
-		else {
-			if (elapsedMinutes(&t, &timeRecoveryStarted) >= ENABLE_WAIT_MINUTES) {
-				isPowerOutDisabled = false;
+			if (isPowerOutRecovering)
+			{
 				isPowerOutRecovering = false;
-				// Close relay
+				lcd.setCursor(0, 2);
+				lcdPrint(lcd, "", 20);
 			}
 		}
+	}
+
+	if (isPowerOutDisabled)
+	{
+		minutesDisabled = dateDiffMinutes(&timeNow, &timeDisabled);
+	}
+
+	if (scaledVoltage >= ENABLE_VOLTAGE && isPowerOutDisabled)
+	{
+		if (!isPowerOutRecovering)
+		{
+			isPowerOutRecovering = true;
+			recoveryTime = timeNow;
+			addMinutes(&recoveryTime, 5);
+			timeRecoveryStarted = timeNow;
+		}
+		else
+		{
+			if (dateDiffMinutes(&timeNow, &timeRecoveryStarted) >= ENABLE_WAIT_MINUTES)
+			{
+				if (timeDisabled.hour == timeNow.hour)
+				{
+					currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled; // Account for 24 hours+ downtime
+				}
+				else
+				{
+					// The power was disabled in an earlier hour - it crossed hour boundaries.
+					if (timeNow.hour == currentHour)
+					{
+						currentHourData.downMinutes += timeNow.min;
+					}
+				}
+				isPowerOutDisabled = false;
+				isPowerOutRecovering = false;
+				lcd.clear();
+				// Close relay
+				CLOSE_RELAY(VBATT_RELAY);
+			}
+		}
+	}
+
+	if (timeNow.hour != currentHour)
+	{
+		if (currentHour != -1)
+		{
+			if (isPowerOutDisabled)
+			{
+				currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled;
+			}
+			CloseCurrentHour(hourlyData, &currentHourData, DATA_HOURS % currentHour);
+		}
+		PrepCurrentHour(&currentHourData, &timeNow, &rawVoltageSample, &tempSample);
+		currentHour = timeNow.hour;
+	}
+	else
+	{
+		AddSampleToCurrentHour(&currentHourData, &timeNow, &rawVoltageSample, &tempSample);
 	}
 
 	formatFloat(scaledVoltage, voltStr, 5, 2);
 	formatFloat(tempSample, tempStr, 5, 1);
 
 	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
-	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, t.hour, t.min);
+	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, timeNow.hour, timeNow.min);
 	lcd.setCursor(0, 0);
 	lcdPrint(lcd, buffer, 20);
 
 	lcd.setCursor(0, 1);
-	if (isPowerOutDisabled) {
+	if (isPowerOutDisabled)
+	{
 		sprintf(buffer, "Power off %d mins", minutesDisabled);
-		lcdPrint(lcd, buffer, 20);
 	}
-	else {
+	else
+	{
 		strcpy(buffer, "Power ON");
 	}
-	lcd.write((byte)LCD_DOWN_ARROW);
-	lcd.write((byte)LCD_UP_ARROW);
-	
+	lcdPrint(lcd, buffer, 20);
+
+
+	if (isPowerOutRecovering)
+	{
+		ElapsedTime timeToRecover = dateDiff(&timeNow, &recoveryTime);
+		lcd.setCursor(0, 2);
+		sprintf(buffer, "Recovery in %2d:%02d", abs(timeToRecover.minute), abs(timeToRecover.second));
+		lcdPrint(lcd, buffer, 20);
+	}
+
 	sprintf(buffer, "        ");
 	buffer[0] = (byte)LCD_DOWN_ARROW;
 	buffer[2] = (byte)LCD_UP_ARROW;
 	buffer[4] = (byte)LCD_DOWN_ARROW;
 	buffer[6] = (byte)LCD_UP_ARROW;
-	lcd.setCursor(0, 2);
+	lcd.setCursor(0, 3);
 	lcd.write(buffer, strlen(buffer));
 	//lcdPrint(lcd, buffer, 20);
 
@@ -303,7 +364,7 @@ void DoWakingTasks() {
 	//lcdPrint(lcd, buffer, 20);
 
 	// display current time
-	//snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", t.year_s, t.mon, t.mday, t.hour, t.min, t.sec);
+	//snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", timeNow.year_s, timeNow.mon, timeNow.mday, timeNow.hour, timeNow.min, timeNow.sec);
 
 	//lcd.setCursor(0, 1);
 	//lcdPrint(lcd, buffer, 20);
@@ -357,7 +418,7 @@ void wakeSleepControlISR() {
 
 // When RTC_WAKE_PIN is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
 void sleepISR() {
-	// Prevent sleep mode, so we don't enter it again, except deliberately, by code
+	// Prevent sleep mode, so we don'timeNow enter it again, except deliberately, by code
 	sleep_disable();
 
 	// Detach the interrupt that brought us out of sleep

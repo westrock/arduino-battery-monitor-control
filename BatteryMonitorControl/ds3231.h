@@ -105,9 +105,7 @@ uint8_t bcdtodec(const uint8_t val);
 uint8_t inp2toi(char *cmd, const uint16_t seek);
 bool isLeapYear(uint16_t year);
 uint16_t MMDDtoDDD(DateTimeDS3231 *dateTime);
-void DDDtoMMDD(DateTimeDS3231* dateTime, int8_t* mm, int8_t* dd);
-int32_t elapsedMinutes(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime);
-int32_t DateDiff(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime);
+void DDDtoMMDD(DateTimeDS3231* dateTime, uint8_t* mm, uint8_t* dd);
 
 
 #endif

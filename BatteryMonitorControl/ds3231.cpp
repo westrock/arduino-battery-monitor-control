@@ -134,17 +134,18 @@ void DS3231_get(DateTimeDS3231 *t)
     // There's no going back
     year_full = 2000 + TimeDate[6];
 
-    t->sec    = TimeDate[0];
-    t->min    = TimeDate[1];
-    t->hour   = TimeDate[2];
-    t->mday   = TimeDate[4];
-    t->mon    = TimeDate[5];
-    t->year   = year_full;
-    t->wday   = TimeDate[3];
-    t->year_s = TimeDate[6];
-	t->yday   = MMDDtoDDD(t);
+    t->sec		= TimeDate[0];
+    t->min		= TimeDate[1];
+    t->hour		= TimeDate[2];
+    t->mday		= TimeDate[4];
+    t->mon		= TimeDate[5];
+    t->year     = year_full;
+    t->wday		= TimeDate[3];
+    t->year_s	= TimeDate[6];
+	t->leapYear	= isLeapYear(year_full);
+	t->yday		= MMDDtoDDD(t);
 #ifdef CONFIG_UNIXTIME
-    t->unixtime = get_unixtime(*t);
+    t->unixtime	= get_unixtime(*t);
 #endif
 }
 
@@ -297,8 +298,8 @@ float DS3231_get_treg()
 void DS3231_set_32kHz_output(const uint8_t on)
 {
     /*
-     * Note, the pin1 is an open drain pin, therfore a pullup
-     * resitor is required to use the output.
+     * Note, the pin1 is an open drain pin, therefore a pullup
+     * resistor is required to use the output.
      */
     if (on) {
         uint8_t sreg = DS3231_get_sreg();
@@ -511,17 +512,17 @@ uint8_t inp2toi(char *cmd, const uint16_t seek)
 }
 
 bool isLeapYear(uint16_t year) {
-	return ((year % 400 == 0) || (year % 100 != 0) && (year % 4 == 0));
+	return ((year % 400 == 0) || ((year % 100 != 0) && (year % 4 == 0)));
 }
 
 
 uint16_t MMDDtoDDD(DateTimeDS3231* dateTime)
 {
-	return (dateTime->mon < 1 || dateTime->mon > 12) ? -1 : (isLeapYear ? _LeapMonthDays[dateTime->mon - 1] : _CommonMonthDays[dateTime->mon - 1]) + dateTime->mday;
+	return (dateTime->mon < 1 || dateTime->mon > 12) ? -1 : (dateTime->leapYear ? _LeapMonthDays[dateTime->mon - 1] : _CommonMonthDays[dateTime->mon - 1]) + dateTime->mday;
 }
 
 
-void DDDtoMMDD(DateTimeDS3231* dateTime, int8_t* mm, int8_t* dd)
+void DDDtoMMDD(DateTimeDS3231* dateTime, uint8_t* mm, uint8_t* dd)
 {
 	int8_t  i = 1;
 	const uint16_t* monthDays = (dateTime->leapYear ? _LeapMonthDays : _CommonMonthDays);
@@ -534,31 +535,3 @@ void DDDtoMMDD(DateTimeDS3231* dateTime, int8_t* mm, int8_t* dd)
 	*mm = i;
 }
 
-
-
-int32_t elapsedMinutes(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime) {
-	DateDiff(pCurDayTime, pTgtDayTime) / 60;
-}
-
-
-int32_t DateDiff(DateTimeDS3231* pCurDayTime, DateTimeDS3231* pTgtDayTime)
-{
-	int32_t	seconds = 0;
-
-	seconds = pCurDayTime->sec - pTgtDayTime->sec;
-	seconds += (pCurDayTime->min - pTgtDayTime->min) * 60;
-
-	// Shortcutting calculations below to skip unneccessary arithmetic
-	if (pCurDayTime->hour != pTgtDayTime->hour) {
-		seconds += (pCurDayTime->hour - pTgtDayTime->hour) * 60 * 60;
-	}
-	if (pCurDayTime->yday != pTgtDayTime->yday) {
-		seconds += (pCurDayTime->yday - pTgtDayTime->yday) * 24 * 60 * 60;
-	}
-	if (pCurDayTime->year != pTgtDayTime->year) {
-		// I am being sloppy here w.r.t. leap years.  So sue me
-		seconds += (pCurDayTime->year - pTgtDayTime->year) * 365 * 24 * 60 * 60;
-	}
-
-	return seconds;
-}

@@ -32,6 +32,7 @@ struct currentHourDataStruct {
   uint8_t   minMinute;		// The minute the vMin was recorded
   uint8_t   maxMinute;		// The minute the vMax was recorded
   uint8_t   samples;		// The number of samples
+  uint8_t	downMinutes;	// Number of minutes this hour the power was down
   uint16_t  vTotal;			// The total of raw voltage readings
   uint16_t  vMin;			// The minimum raw voltage this hour
   uint16_t  vMax;			// The maximum raw voltage this hour
@@ -43,6 +44,7 @@ typedef struct currentHourDataStruct CurrentHourData;
 
 struct hourlyDataStruct {
 	uint8_t		hour;			// The hour this represents
+	uint8_t		downMinutes;	// Number of minutes this hour the power was down
 	uint8_t		minMinute;		// The minute the vMin was recorded
 	uint8_t		maxMinute;		// The minute the vMax was recorded
 	uint16_t	vMin;			// The minimum raw voltage this hour
