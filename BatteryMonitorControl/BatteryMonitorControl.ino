@@ -36,9 +36,16 @@
 #include "DateTimeHelpers.h"
 #include "DataAcquisition.h"
 
-/*========================+
-| #defines                |
-+========================*/
+/*==========================+
+|	enums					|
++==========================*/
+
+enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOfReports };
+enum relayType { BinaryRelay = 0, PWMRelay = 1 };
+
+/*==========================+
+|	#defines				|
++==========================*/
 #define VDIV_SCALE 4.588694								//
 #define VREG 5.0										//
 
@@ -50,13 +57,13 @@
 	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
 #endif
 
-#define TEMP_SENSOR A0								// An LM34 thermometer
-#define V5_SENSOR A1								// This pin measures the VREF-limited external (battery) voltage
-#define VBATT_RELAY 9								// This relay allows current to flow in to the pin at V5_SENSOR
+#define TEMP_SENSOR				A0					// An LM34 thermometer
+#define V5_SENSOR				A1					// This pin measures the VREF-limited external (battery) voltage
+#define VBATT_RELAY				9					// This relay allows current to flow in to the pin at V5_SENSOR
 
-#define WAKE_SLEEP_PIN 2							// When low, makes 328P go to sleep
-#define RTC_WAKE_PIN 3								// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
-#define LED_PIN 4									// output pin for the LED (to show it is awake)
+#define WAKE_SLEEP_PIN			2					// When low, makes 328P go to sleep
+#define RTC_WAKE_PIN			3					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define LED_PIN					4					// output pin for the LED (to show it is awake)
 
 #define DISABLE_VOLTAGE			11.25
 #define ENABLE_VOLTAGE			11.30
@@ -64,8 +71,9 @@
 #define DATA_HOURS				24
 #define BUFF_MAX				256
 #define REPORTING_DELAY_SECONDS	6
-
-enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOfReports};
+#define BINARY_RELAY			1
+#define PWM_RELAY				2
+#define RELAY_TYPE				PWM_RELAY
 
 #ifdef DATA_HOURS
 	#if !(DATA_HOURS==1 || DATA_HOURS==2 || DATA_HOURS==3 || DATA_HOURS==4 || DATA_HOURS==6 || DATA_HOURS==12 || DATA_HOURS==24)
@@ -75,9 +83,13 @@ enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOf
 		#error "DATA_HOURS is not defined."
 #endif
 
-/*========================+
-| Local Types            |
-+========================*/
+#ifdef RELAY_TYPE
+	#if !(RELAY_TYPE==BINARY_RELAY || RELAY_TYPE==PWM_RELAY)
+		#error "RELAY_TYPE must be either BINARY_RELAY or PWM_RELAY."
+	#endif
+	#else
+		#error "RELAY_TYPE is not defined."
+#endif
 
 
 /*========================+
@@ -97,7 +109,6 @@ DS3231Time		timeDisabled;						// The time the voltage initially dropped below t
 DS3231Time		timeRecoveryStarted;				// The time the voltage started to rebound
 DateTimeDS3231	recoveryTime;						// The time recovery will be completed
 
-
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
 
@@ -110,33 +121,8 @@ void doBlink(uint8_t ledPin);
 void sleepISR();
 void preSleep();
 void DoWakingTasks();
-
-void OPEN_RELAY(uint8_t pin);
-void CLOSE_RELAY(uint8_t pin);
-
-void OPEN_RELAY(uint8_t pin)
-{
-	Serial.println("opening relay");
-	for (int i = 254; i > 0; i--)
-	{
-		analogWrite(pin, i);
-		delay(4);
-	}
-	digitalWrite(pin, LOW);
-}
-
-void CLOSE_RELAY(uint8_t pin)
-{
-	Serial.println("closing relay");
-	for (int i = 0; i < 255; i++)
-	{
-		analogWrite(pin, i);
-		delay(4);
-	}
-	digitalWrite(pin, HIGH);
-}
-
-
+void openRelay(uint8_t pin);
+void closeRelay(uint8_t pin);
 void printCharInHexadecimal(char* str, int len);
 
 
@@ -153,7 +139,7 @@ void setup() {
 
 	// Set the VREF basis to the external value
 	// and allow voltage to come in.
-	CLOSE_RELAY(VBATT_RELAY);
+	closeRelay(VBATT_RELAY);
 	delay(100);
 
 #ifdef USE_EXTERNALVREF
@@ -186,19 +172,6 @@ void setup() {
 	}
 
 	DoWakingTasks();
-}
-
-
-void printCharInHexadecimal(char* str, int len) {
-	for (int i = 0; i < len; ++i) {
-		unsigned char val = str[i];
-		char tbl[] = "0123456789ABCDEF";
-		Serial.print("0x");
-		Serial.print(tbl[val / 16]);
-		Serial.print(tbl[val % 16]);
-		Serial.print(" ");
-	}
-	Serial.println();
 }
 
 
@@ -304,7 +277,7 @@ void DoWakingTasks() {
 			{
 				isPowerOutDisabled = true;
 				timeDisabled = timeNow;		// Set the time the voltage dropped below the threshold
-				OPEN_RELAY(VBATT_RELAY);
+				openRelay(VBATT_RELAY);
 			}
 
 			if (isPowerOutRecovering)
@@ -350,7 +323,7 @@ void DoWakingTasks() {
 				isPowerOutRecovering = false;
 				lcd.clear();
 				// Close relay
-				CLOSE_RELAY(VBATT_RELAY);
+				closeRelay(VBATT_RELAY);
 			}
 		}
 	}
@@ -477,4 +450,46 @@ void sleepISR() {
 	detachInterrupt(digitalPinToInterrupt(RTC_WAKE_PIN));
 
 	// Now we continue running the main Loop() just after we went to sleep
+}
+
+
+
+void openRelay(uint8_t pin)
+{
+	Serial.println("opening relay");
+#if (RELAY_TYPE==PWM_RELAY)
+	for (int i = 254; i > 0; i--)
+	{
+		analogWrite(pin, i);
+		delay(4);
+	}
+#endif
+	digitalWrite(pin, LOW);
+}
+
+
+void closeRelay(uint8_t pin)
+{
+	Serial.println("closing relay");
+#if (RELAY_TYPE==PWM_RELAY)
+	for (int i = 0; i < 255; i++)
+	{
+		analogWrite(pin, i);
+		delay(4);
+	}
+#endif
+	digitalWrite(pin, HIGH);
+}
+
+
+void printCharInHexadecimal(char* str, int len) {
+	for (int i = 0; i < len; ++i) {
+		unsigned char val = str[i];
+		char tbl[] = "0123456789ABCDEF";
+		Serial.print("0x");
+		Serial.print(tbl[val / 16]);
+		Serial.print(tbl[val % 16]);
+		Serial.print(" ");
+	}
+	Serial.println();
 }
