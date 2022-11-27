@@ -21,7 +21,7 @@
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
 
-#include "DS3231Helper.h"
+#include "DS3231Helpers.h"
 #include "ds3231.h"
 #include <avr/sleep.h>
 
@@ -29,11 +29,11 @@
 // Set the next alarm
 void setNextAlarm(uint8_t wakeInHours, uint8_t wakeInMinutes, uint8_t wakeInSeconds)
 {
-  DS3231Time timeData;
-  uint8_t wake_HOUR;
-  uint8_t wake_MINUTE;
-  uint8_t wake_SECOND;
-  uint8_t flags[5] = { 0, 0, 0, 1, 1 };
+	DateTimeDS3231	timeData;
+	uint8_t			wake_HOUR;
+	uint8_t			wake_MINUTE;
+	uint8_t			wake_SECOND;
+	uint8_t			flags[5] = { 0, 0, 0, 1, 1 };
   // flags define what calendar component to be checked against the current time in order
   // to trigger the alarm - see datasheet
   // A1M1 (seconds) (0 to enable, 1 to disable)

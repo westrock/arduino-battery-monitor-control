@@ -29,10 +29,11 @@
 #include "ds3231.h"
 #include "config.h"
 
+#include "ReportingHelpers.h"
 #include "DataAcquisition.h"
 #include "LCDHelper.h"
 #include "HourlyDataTypes.h"
-#include "DS3231Helper.h"
+#include "DS3231Helpers.h"
 #include "DateTimeHelpers.h"
 #include "DataAcquisition.h"
 
@@ -40,8 +41,20 @@
 |	enums					|
 +==========================*/
 
-enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOfReports };
 enum relayType { BinaryRelay = 0, PWMRelay = 1 };
+enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOfReports };
+
+/*==========================+
+|	typedefs				|
++==========================*/
+
+struct reportControlStruct
+{
+	DateTimeDS3231	previousTime;
+	int				reportingCycle = FirstReport;
+};
+typedef struct reportControlStruct ReportControl;
+
 
 /*==========================+
 |	#defines				|
@@ -65,10 +78,10 @@ enum relayType { BinaryRelay = 0, PWMRelay = 1 };
 #define RTC_WAKE_PIN			3					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 #define LED_PIN					4					// output pin for the LED (to show it is awake)
 
+#define DATA_HOURS				24
 #define DISABLE_VOLTAGE			11.25
 #define ENABLE_VOLTAGE			11.30
 #define ENABLE_WAIT_MINUTES		2					// <<---- 
-#define DATA_HOURS				24
 #define BUFF_MAX				256
 #define REPORTING_DELAY_SECONDS	6
 #define BINARY_RELAY			1
@@ -91,44 +104,47 @@ enum relayType { BinaryRelay = 0, PWMRelay = 1 };
 		#error "RELAY_TYPE is not defined."
 #endif
 
-
 /*========================+
 | Local Variables         |
 +========================*/
 volatile bool	sleepRequested = true;
 volatile bool	wakeSleepISRSet = false;
 
-bool			isPowerOutDisabled = false;			// Indicates the power out has been disabled (the relay is open)
-bool			isPowerOutRecovering = false;		// Indicates the power is recovering (the relay is still open)
-uint16_t		currentDDD = -1;					// The current day of year.  Used to help calculate time intervals and evaluate power events
-uint8_t			currentDay = -1;					// The current day.  Used to help calculate time intervals and evaluate power events
-uint8_t			currentHour = -1;					// The current hour.  Used to store/update samples
+ReportControl		reportControl;
+
+DateTimeDS3231	timeDisabled;						// The time the voltage initially dropped below the low threshold 
+DateTimeDS3231	timeRecoveryStarted;				// The time the voltage started to rebound
+DateTimeDS3231	recoveryTime;						// The time recovery will be completed
 CurrentHourData	currentHourData;					// Total, min, and max values for the current hour
 HourlyData		hourlyData[DATA_HOURS];				//
-DS3231Time		timeDisabled;						// The time the voltage initially dropped below the low threshold 
-DS3231Time		timeRecoveryStarted;				// The time the voltage started to rebound
-DateTimeDS3231	recoveryTime;						// The time recovery will be completed
+uint8_t			currentHour = -1;					// The current hour.  Used to store/update samples
+bool			isPowerOutDisabled = false;			// Indicates the power out has been disabled (the relay is open)
+bool			isPowerOutRecovering = false;		// Indicates the power is recovering (the relay is still open)
 
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
 
-// DS3231 alarm time
-
 /*========================+
 | Function Definitions    |
 +========================*/
-void doBlink(uint8_t ledPin);
 void sleepISR();
 void preSleep();
 void DoWakingTasks();
 void openRelay(uint8_t pin);
 void closeRelay(uint8_t pin);
 void printCharInHexadecimal(char* str, int len);
+void DoReportingTasks(ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds);
+void doBlink(uint8_t ledPin);
 
 
 void setup() {
 	// put your setup code here, to run once:
 	Serial.begin(9600);
+	Serial.println("Beginning");
+	Serial.flush();
+
+	pinMode(LED_PIN, OUTPUT);
+	digitalWrite(LED_PIN, LOW);
 
 	// Set the voltage-monitoring pins
 	pinMode(TEMP_SENSOR, INPUT);
@@ -149,8 +165,8 @@ void setup() {
 #endif
 
 	// Flashing LED just to show the �Controller is running
-	digitalWrite(LED_PIN, LOW);
 	pinMode(LED_PIN, OUTPUT);
+	digitalWrite(LED_PIN, LOW);
 
 	lcd.begin(20, 4);
 	CreateArrows(lcd);
@@ -162,6 +178,7 @@ void setup() {
 	DS3231_clear_a1f();
 
 	PrepHourlyData(hourlyData, DATA_HOURS);
+	reportControl.previousTime = GetTime();
 
 	Serial.println("Setup completed.");
 
@@ -174,15 +191,14 @@ void setup() {
 	DoWakingTasks();
 }
 
-
 void loop()
 {
-	static int reportingCycle = FirstReport;
-	static DS3231Time previousTime = GetTime();
 	static byte prevADCSRA;
 	char buff[BUFF_MAX];
 
-	if (!wakeSleepISRSet) {
+	if (!wakeSleepISRSet)
+	{
+		// Wake/Sleep Interrupts are not set up. Set up the button
 		noInterrupts();
 		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_PIN), wakeSleepControlISR, LOW);
 		wakeSleepISRSet = true;
@@ -205,7 +221,9 @@ void loop()
 	}
 	else
 	{
-		DS3231Time timeNow;
+		DoReportingTasks(&reportControl, lcd, REPORTING_DELAY_SECONDS);
+/*
+		DateTimeDS3231 timeNow;
 
 		DS3231_get(&timeNow);
 		int32_t secondsElapsed = dateDiffSeconds(&timeNow, &previousTime);
@@ -247,20 +265,42 @@ void loop()
 				reportingCycle = FirstReport;
 			}
 		}
+		*/
+	}
+}
+
+
+
+// Double blink just to show we are running. Note that we do NOT
+// use the delay for the final delay here, this is done by checking
+// millis instead (non-blocking)
+void doBlink(uint8_t ledPin) {
+	static unsigned long lastMillis = 0;
+
+	if (millis() > lastMillis + 1000)
+	{
+		digitalWrite(ledPin, HIGH);
+		delay(10);
+		digitalWrite(ledPin, LOW);
+		delay(200);
+		digitalWrite(ledPin, HIGH);
+		delay(10);
+		digitalWrite(ledPin, LOW);
+		lastMillis = millis();
 	}
 }
 
 
 void DoWakingTasks() {
-	DS3231Time timeNow;
-	char voltStr[6];
-	char tempStr[6];
-	char buffer[20];
-	float tempSample;
-	float scaledVoltage;
-	uint16_t rawVoltageSample;
-	uint16_t minutesDisabled = 0;
-	static bool tempSource = true;
+	DateTimeDS3231	timeNow;
+	char			voltStr[6];
+	char			tempStr[6];
+	char			buffer[20];
+	float			tempSample;
+	float			scaledVoltage;
+	uint16_t		rawVoltageSample;
+	uint16_t		minutesDisabled = 0;
+	static bool		tempSource = true;
 
 	Serial.println("Waking");
 
@@ -396,29 +436,6 @@ void DoWakingTasks() {
 }
 
 
-
-
-
-// Double blink just to show we are running. Note that we do NOT
-// use the delay for the final delay here, this is done by checking
-// millis instead (non-blocking)
-void doBlink(uint8_t ledPin) {
-	static unsigned long lastMillis = 0;
-
-	if (millis() > lastMillis + 1000)
-	{
-		digitalWrite(ledPin, HIGH);
-		delay(10);
-		digitalWrite(ledPin, LOW);
-		delay(200);
-		digitalWrite(ledPin, HIGH);
-		delay(10);
-		digitalWrite(ledPin, LOW);
-		lastMillis = millis();
-	}
-}
-
-
 void preSleep() {
 	// Send a message just to show we are about to sleep
 	Serial.println("Going to sleep now.");
@@ -493,3 +510,52 @@ void printCharInHexadecimal(char* str, int len) {
 	}
 	Serial.println();
 }
+
+
+
+void DoReportingTasks(ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds)
+{
+	DateTimeDS3231 timeNow;
+
+	DS3231_get(&timeNow);
+	int32_t secondsElapsed = dateDiffSeconds(&timeNow, &(reportControl->previousTime));
+
+	if (secondsElapsed >= reportingDelaySeconds)
+	{
+		reportControl->previousTime = timeNow;
+		lcd.clear();
+		switch (reportControl->reportingCycle)
+		{
+		case Report0:
+			lcd.setCursor(0, 1);
+			if (isPowerOutDisabled)
+			{
+				lcdPrint(lcd, "Power Off", 20);
+			}
+			else {
+				lcdPrint(lcd, "Power On", 20);
+			}
+			break;
+		case Report1:
+			lcd.setCursor(0, 1);
+			lcdPrint(lcd, "reportingCycle 1", 20);
+			break;
+		case Report2:
+			lcd.setCursor(0, 1);
+			lcdPrint(lcd, "reportingCycle 2", 20);
+			break;
+		case Report3:
+			lcd.setCursor(0, 1);
+			lcdPrint(lcd, "reportingCycle 3", 20);
+			break;
+		default:
+			break;
+		}
+		reportControl->reportingCycle++;
+		if (reportControl->reportingCycle >= EndOfReports)
+		{
+			reportControl->reportingCycle = FirstReport;
+		}
+	}
+}
+

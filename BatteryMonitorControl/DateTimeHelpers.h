@@ -26,6 +26,7 @@
 
 #include "Arduino.h"
 #include "ds3231.h"
+#include "DateTimeHelpers.h"
 
 
 struct elapsedTimeStruct {

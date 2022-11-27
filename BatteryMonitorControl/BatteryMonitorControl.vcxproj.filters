@@ -21,7 +21,7 @@
     <ClInclude Include="__vm\.BatteryMonitorControl.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DS3231Helper.h">
+    <ClInclude Include="DS3231Helpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="HourlyDataTypes.h">
@@ -42,9 +42,12 @@
     <ClInclude Include="ds3231.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ReportingHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="DS3231Helper.cpp">
+    <ClCompile Include="DS3231Helpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="HourlyDataTypes.cpp">
@@ -60,6 +63,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ds3231.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ReportingHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
