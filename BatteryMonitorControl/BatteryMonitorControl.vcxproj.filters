@@ -30,9 +30,6 @@
     <ClInclude Include="LCDHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DataAcquisition.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="DateTimeHelpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -42,7 +39,7 @@
     <ClInclude Include="ds3231.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ReportingHelpers.h">
+    <ClInclude Include="DataAcquisitionAndReporting.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -56,16 +53,13 @@
     <ClCompile Include="LCDHelper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DataAcquisition.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="DateTimeHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ds3231.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ReportingHelpers.cpp">
+    <ClCompile Include="DataAcquisitionAndReporting.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

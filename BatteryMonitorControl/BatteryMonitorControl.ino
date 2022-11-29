@@ -29,31 +29,11 @@
 #include "ds3231.h"
 #include "config.h"
 
-#include "ReportingHelpers.h"
-#include "DataAcquisition.h"
+#include "DataAcquisitionAndReporting.h"
 #include "LCDHelper.h"
 #include "HourlyDataTypes.h"
 #include "DS3231Helpers.h"
 #include "DateTimeHelpers.h"
-#include "DataAcquisition.h"
-
-/*==========================+
-|	enums					|
-+==========================*/
-
-enum relayType { BinaryRelay = 0, PWMRelay = 1 };
-enum reportType { FirstReport = 0, Report0 = 0, Report1, Report2, Report3, EndOfReports };
-
-/*==========================+
-|	typedefs				|
-+==========================*/
-
-struct reportControlStruct
-{
-	DateTimeDS3231	previousTime;
-	int				reportingCycle = FirstReport;
-};
-typedef struct reportControlStruct ReportControl;
 
 
 /*==========================+
@@ -74,11 +54,10 @@ typedef struct reportControlStruct ReportControl;
 #define V5_SENSOR				A1					// This pin measures the VREF-limited external (battery) voltage
 #define VBATT_RELAY				9					// This relay allows current to flow in to the pin at V5_SENSOR
 
-#define WAKE_SLEEP_PIN			2					// When low, makes 328P go to sleep
-#define RTC_WAKE_PIN			3					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define WAKE_SLEEP_BUTTON		2					// When low, makes 328P go to sleep
+#define RTC_WAKE_ALARM			3					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 #define LED_PIN					4					// output pin for the LED (to show it is awake)
 
-#define DATA_HOURS				24
 #define DISABLE_VOLTAGE			11.25
 #define ENABLE_VOLTAGE			11.30
 #define ENABLE_WAIT_MINUTES		2					// <<---- 
@@ -110,16 +89,9 @@ typedef struct reportControlStruct ReportControl;
 volatile bool	sleepRequested = true;
 volatile bool	wakeSleepISRSet = false;
 
-ReportControl		reportControl;
-
-DateTimeDS3231	timeDisabled;						// The time the voltage initially dropped below the low threshold 
-DateTimeDS3231	timeRecoveryStarted;				// The time the voltage started to rebound
-DateTimeDS3231	recoveryTime;						// The time recovery will be completed
-CurrentHourData	currentHourData;					// Total, min, and max values for the current hour
-HourlyData		hourlyData[DATA_HOURS];				//
-uint8_t			currentHour = -1;					// The current hour.  Used to store/update samples
-bool			isPowerOutDisabled = false;			// Indicates the power out has been disabled (the relay is open)
-bool			isPowerOutRecovering = false;		// Indicates the power is recovering (the relay is still open)
+static ReportControl	reportControl;
+static SamplingData		samplingData;
+static bool				isOutputRelayClosed = false;		// If not Closed then no power goes through.  If Closed power flows.
 
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
@@ -127,80 +99,70 @@ LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
 /*========================+
 | Function Definitions    |
 +========================*/
-void sleepISR();
+void realTimeClockWakeISR();
 void preSleep();
-void DoWakingTasks();
-void openRelay(uint8_t pin);
-void closeRelay(uint8_t pin);
+void DoWakingTasks(SamplingData * samplingData);
+void CloseCurrentAndPrepNewHourWithSample(SamplingData* samplingData, DateTimeDS3231* now, uint16_t minutesDisabled, uint16_t* rawVoltage, float* temperature);
+bool openRelay(uint8_t pin);
+bool openRelay(uint8_t pin, bool immediate);
+bool closeRelay(uint8_t pin);
+bool closeRelay(uint8_t pin, bool immediate);
 void printCharInHexadecimal(char* str, int len);
-void DoReportingTasks(ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds);
 void doBlink(uint8_t ledPin);
 
 
 void setup() {
-	// put your setup code here, to run once:
-	Serial.begin(9600);
-	Serial.println("Beginning");
-	Serial.flush();
-
-	pinMode(LED_PIN, OUTPUT);
-	digitalWrite(LED_PIN, LOW);
-
-	// Set the voltage-monitoring pins
-	pinMode(TEMP_SENSOR, INPUT);
-	pinMode(V5_SENSOR, INPUT);
-	pinMode(VBATT_RELAY, OUTPUT);
-	pinMode(WAKE_SLEEP_PIN, INPUT_PULLUP);
-	pinMode(RTC_WAKE_PIN, INPUT_PULLUP);
-
-	// Set the VREF basis to the external value
-	// and allow voltage to come in.
-	closeRelay(VBATT_RELAY);
-	delay(100);
-
 #ifdef USE_EXTERNALVREF
 	analogReference(EXTERNAL);
 #else
 	analogReference(DEFAULT);
 #endif
 
-	// Flashing LED just to show the �Controller is running
-	pinMode(LED_PIN, OUTPUT);
-	digitalWrite(LED_PIN, LOW);
-
+	// Start LCD and Serial
 	lcd.begin(20, 4);
-	CreateArrows(lcd);
+	Serial.begin(9600);
+
+	// Set the voltage-monitoring, temperature, button, and RTC alarm pins
+	pinMode(TEMP_SENSOR, INPUT);
+	pinMode(V5_SENSOR, INPUT);
+	pinMode(VBATT_RELAY, OUTPUT);
+	pinMode(WAKE_SLEEP_BUTTON, INPUT_PULLUP);
+	pinMode(RTC_WAKE_ALARM, INPUT_PULLUP);
+	pinMode(LED_PIN, OUTPUT);
+
+	// Open the relay to prevent power out until we establish what's what
+	isOutputRelayClosed = openRelay(VBATT_RELAY, true);
+	samplingData.isPowerOutDisabled = true;
+	samplingData.isIntialized = false;
 
 	// Clear the current alarm (puts DS3231 INT high)
 	Wire.begin();
 	DS3231_init(DS3231_CONTROL_INTCN);
-
 	DS3231_clear_a1f();
 
-	PrepHourlyData(hourlyData, DATA_HOURS);
+	PrepHourlyData(&samplingData.hourlyData[0], DATA_HOURS);
 	reportControl.previousTime = GetTime();
 
+	CreateArrows(lcd);
+
+//	DoWakingTasks(&samplingData);
+
 	Serial.println("Setup completed.");
-
-	for (int i = 0; i < 100; i++)
-	{
-		doBlink(LED_PIN);
-		delay(5);
-	}
-
-	DoWakingTasks();
 }
+
 
 void loop()
 {
+	static bool firstTime = true;
+	bool wasReporting = false;
 	static byte prevADCSRA;
 	char buff[BUFF_MAX];
 
 	if (!wakeSleepISRSet)
 	{
-		// Wake/Sleep Interrupts are not set up. Set up the button
+		// Wake/Sleep Interrupts are not set up or were disabled. Set up the button
 		noInterrupts();
-		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_PIN), wakeSleepControlISR, LOW);
+		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON), wakeSleepControlISR, LOW);
 		wakeSleepISRSet = true;
 		interrupts();
 		Serial.println("wakeSleepISRSet ACTIVATED");
@@ -212,60 +174,24 @@ void loop()
 	// Has the button on the "go to sleep" pin been toggled?
 	if (sleepRequested)
 	{
+		DoWakingTasks(&samplingData);
 		Serial.println("sleep REQUESTED");
 
-		setAlarmAndSleep(RTC_WAKE_PIN, sleepISR, preSleep, &prevADCSRA, 0, 0, 10);	// 0, 1, 0
-		postWakeISRCleanup(&prevADCSRA);
+		if (!wasReporting)
+		{
+			setAlarmAndSleep(RTC_WAKE_ALARM, realTimeClockWakeISR, preSleep, &prevADCSRA, 0, 0, 10);	// 0, 1, 0
+			postWakeISRCleanup(&prevADCSRA);
+		}
+		else
+		{
+			wasReporting = false;
+		}
 
-		DoWakingTasks();
 	}
 	else
 	{
-		DoReportingTasks(&reportControl, lcd, REPORTING_DELAY_SECONDS);
-/*
-		DateTimeDS3231 timeNow;
-
-		DS3231_get(&timeNow);
-		int32_t secondsElapsed = dateDiffSeconds(&timeNow, &previousTime);
-
-		if (secondsElapsed > REPORTING_DELAY_SECONDS)
-		{
-			previousTime = timeNow;
-			lcd.clear();
-			switch (reportingCycle)
-			{
-			case Report0:
-				lcd.setCursor(0, 1);
-				if (isPowerOutDisabled)
-				{
-					lcdPrint(lcd, "Power Off", 20);
-				}
-				else {
-					lcdPrint(lcd, "Power On", 20);
-				}
-				break;
-			case Report1:
-				lcd.setCursor(0, 1);
-				lcdPrint(lcd, "reportingCycle 1", 20);
-				break;
-			case Report2:
-				lcd.setCursor(0, 1);
-				lcdPrint(lcd, "reportingCycle 2", 20);
-				break;
-			case Report3:
-				lcd.setCursor(0, 1);
-				lcdPrint(lcd, "reportingCycle 3", 20);
-				break;
-			default:
-				break;
-			}
-			reportingCycle++;
-			if (reportingCycle >= EndOfReports)
-			{
-				reportingCycle = FirstReport;
-			}
-		}
-		*/
+		DoReportingTasks(&samplingData, &reportControl, lcd, REPORTING_DELAY_SECONDS);
+		wasReporting = true;
 	}
 }
 
@@ -290,8 +216,63 @@ void doBlink(uint8_t ledPin) {
 	}
 }
 
+void DisablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool *isRelayClosed, uint8_t powerRelay)
+{
+	Serial.print("*** ");
+	Serial.println("in DisablePower()");
+	samplingData->isPowerOutDisabled = true;
+	samplingData->timeDisabled = *now;
+	if (*isRelayClosed)
+	{
+		*isRelayClosed = openRelay(powerRelay);
+	}
+}
 
-void DoWakingTasks() {
+void EnablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool* isRelayClosed, uint8_t powerRelay)
+{
+	Serial.print("*** ");
+	Serial.println("in EnablePower()");
+	samplingData->isPowerOutDisabled = false;
+	samplingData->isPowerOutRecovering = false;
+	samplingData->timeEnabled = *now;
+	if (!*isRelayClosed)
+	{
+		*isRelayClosed = closeRelay(powerRelay);
+	}
+	
+}
+
+void SetupRecovery(SamplingData* samplingData, DateTimeDS3231 *now, uint8_t recoveryDurationMinutes)
+{
+	Serial.print("*** ");
+	Serial.println("in SetupRecovery()");
+	samplingData->isPowerOutRecovering = true;
+	samplingData->timeRecoveryStarted = *now;
+	samplingData->recoveryTime = *now;
+	addMinutes(&samplingData->recoveryTime, recoveryDurationMinutes);
+}
+
+void RecordTimeDisabled(SamplingData* samplingData, DateTimeDS3231 *now, uint16_t timeDisabledMinutes)
+{
+	Serial.print("*** ");
+	Serial.println("in RecordTimeDisabled()");
+	if (samplingData->timeDisabled.hour == now->hour)
+	{
+		samplingData->currentHourData.downMinutes += (timeDisabledMinutes > 60) ? 60 : timeDisabledMinutes; // Account for 24 hours+ downtime
+	}
+	else
+	{
+		// The power was disabled in an earlier hour - it crossed hour boundaries.
+		if (now->hour == samplingData->currentHour)
+		{
+			samplingData->currentHourData.downMinutes += now->min;
+		}
+	}
+}
+
+
+void DoWakingTasks(SamplingData *samplingData)
+{
 	DateTimeDS3231	timeNow;
 	char			voltStr[6];
 	char			tempStr[6];
@@ -310,80 +291,83 @@ void DoWakingTasks() {
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
 	scaledVoltage = rawVoltageSample * VREFSCALE;
 
-	if (scaledVoltage < DISABLE_VOLTAGE) {
-		if (!isPowerOutDisabled || isPowerOutRecovering)
+	if (scaledVoltage < DISABLE_VOLTAGE)
+	{
+		Serial.print("*** ");
+		Serial.println("scaledVoltage < DISABLE_VOLTAGE");
+
+		if (!samplingData->isIntialized)
 		{
-			if (!isPowerOutDisabled)
+			Serial.print("*** ");
+			Serial.println("!samplingData->isIntialized");
+
+			samplingData->isPowerOutRecovering = false;
+			samplingData->isPowerOutDisabled = false;
+			samplingData->isIntialized = true;
+		}
+		if (!samplingData->isPowerOutDisabled || samplingData->isPowerOutRecovering)
+		{
+			if (!samplingData->isPowerOutDisabled)
 			{
-				isPowerOutDisabled = true;
-				timeDisabled = timeNow;		// Set the time the voltage dropped below the threshold
-				openRelay(VBATT_RELAY);
+				DisablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
 			}
 
-			if (isPowerOutRecovering)
+			if (samplingData->isPowerOutRecovering)
 			{
-				isPowerOutRecovering = false;
-				lcd.setCursor(0, 2);
-				lcdPrint(lcd, "", 20);
+				samplingData->isPowerOutRecovering = false;
+				lcdClearLine(lcd, 2);
 			}
 		}
 	}
 
-	if (isPowerOutDisabled)
+	if (samplingData->isPowerOutDisabled)
 	{
-		minutesDisabled = dateDiffMinutes(&timeNow, &timeDisabled);
+		minutesDisabled = dateDiffMinutes(&timeNow, &samplingData->timeDisabled);
 	}
 
-	if (scaledVoltage >= ENABLE_VOLTAGE && isPowerOutDisabled)
+	if (scaledVoltage >= ENABLE_VOLTAGE)
 	{
-		if (!isPowerOutRecovering)
+		Serial.print("*** ");
+		Serial.println("scaledVoltage > DISABLE_VOLTAGE");
+
+		if (!samplingData->isIntialized)
 		{
-			isPowerOutRecovering = true;
-			recoveryTime = timeNow;
-			addMinutes(&recoveryTime, ENABLE_WAIT_MINUTES);
-			timeRecoveryStarted = timeNow;
+			Serial.print("*** ");
+			Serial.println("!samplingData->isIntialized");
+
+			EnablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
+			samplingData->isIntialized = true;
 		}
 		else
 		{
-			if (dateDiffSeconds(&timeNow, &timeRecoveryStarted) >= ENABLE_WAIT_MINUTES * 60)
+			if (samplingData->isPowerOutDisabled)
 			{
-				if (timeDisabled.hour == timeNow.hour)
+				if (!samplingData->isPowerOutRecovering)
 				{
-					currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled; // Account for 24 hours+ downtime
+					SetupRecovery(samplingData, &timeNow, ENABLE_WAIT_MINUTES);
 				}
 				else
 				{
-					// The power was disabled in an earlier hour - it crossed hour boundaries.
-					if (timeNow.hour == currentHour)
+					if (dateDiffSeconds(&timeNow, &samplingData->timeRecoveryStarted) >= ENABLE_WAIT_MINUTES * 60)
 					{
-						currentHourData.downMinutes += timeNow.min;
+						RecordTimeDisabled(samplingData, &timeNow, minutesDisabled);
+						EnablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
+						lcd.clear();
 					}
 				}
-				isPowerOutDisabled = false;
-				isPowerOutRecovering = false;
-				lcd.clear();
-				// Close relay
-				closeRelay(VBATT_RELAY);
 			}
 		}
 	}
 
-	if (timeNow.hour != currentHour)
+	Serial.flush();
+
+	if (timeNow.hour != samplingData->currentHour)
 	{
-		if (currentHour != -1)
-		{
-			if (isPowerOutDisabled)
-			{
-				currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled;
-			}
-			CloseCurrentHour(hourlyData, &currentHourData, DATA_HOURS % currentHour);
-		}
-		PrepCurrentHour(&currentHourData, &timeNow, &rawVoltageSample, &tempSample);
-		currentHour = timeNow.hour;
+		CloseCurrentAndPrepNewHourWithSample(samplingData, &timeNow, minutesDisabled, &rawVoltageSample, &tempSample);
 	}
 	else
 	{
-		AddSampleToCurrentHour(&currentHourData, &timeNow, &rawVoltageSample, &tempSample);
+		AddSampleToCurrentHour(&samplingData->currentHourData, &timeNow, &rawVoltageSample, &tempSample);
 	}
 
 	formatFloat(scaledVoltage, voltStr, 5, 2);
@@ -395,7 +379,7 @@ void DoWakingTasks() {
 	lcdPrint(lcd, buffer, 20);
 
 	lcd.setCursor(0, 1);
-	if (isPowerOutDisabled)
+	if (samplingData->isPowerOutDisabled)
 	{
 		sprintf(buffer, "Power off %d mins", minutesDisabled);
 	}
@@ -406,9 +390,9 @@ void DoWakingTasks() {
 	lcdPrint(lcd, buffer, 20);
 
 
-	if (isPowerOutRecovering)
+	if (samplingData->isPowerOutRecovering)
 	{
-		ElapsedTime timeToRecover = dateDiff(&timeNow, &recoveryTime);
+		ElapsedTime timeToRecover = dateDiff(&timeNow, &samplingData->recoveryTime);
 		lcd.setCursor(0, 2);
 		sprintf(buffer, "Recovery in %2d:%02d", abs(timeToRecover.minute), abs(timeToRecover.second));
 		lcdPrint(lcd, buffer, 20);
@@ -435,6 +419,25 @@ void DoWakingTasks() {
 	//lcdPrint(lcd, buffer, 20);
 }
 
+void CloseCurrentAndPrepNewHourWithSample(SamplingData *samplingData, DateTimeDS3231 *now, uint16_t minutesDisabled, uint16_t *rawVoltage, float *temperature)
+{
+	if (samplingData->currentHour != -1)
+	{
+		Serial.print("Closing current hour ");
+		Serial.print(samplingData->currentHour);
+		Serial.print(", minutesDisabled ");
+		Serial.println(minutesDisabled);
+		Serial.flush();
+		if (samplingData->isPowerOutDisabled)
+		{
+			samplingData->currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled;
+		}
+		CloseCurrentHour(samplingData->hourlyData, &samplingData->currentHourData, samplingData->currentHour % DATA_HOURS);
+	}
+	PrepCurrentHour(&samplingData->currentHourData, now, rawVoltage, temperature);
+	samplingData->currentHour = now->hour;
+}
+
 
 void preSleep() {
 	// Send a message just to show we are about to sleep
@@ -444,58 +447,77 @@ void preSleep() {
 
 
 
-// When WAKE_SLEEP_PIN is brought LOW this interrupt is triggered
+// When WAKE_SLEEP_BUTTON is brought LOW this interrupt is triggered
 void wakeSleepControlISR() {
 	// Detach the interrupt that brought us here
-	detachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_PIN));
+	detachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON));
 	sleepRequested = !sleepRequested;
 	wakeSleepISRSet = false;
 
 	delay(5);
-	while (digitalRead(WAKE_SLEEP_PIN) == LOW) {
+	while (digitalRead(WAKE_SLEEP_BUTTON) == LOW) {
 		delay(5);
 	}
 }
 
 
-// When RTC_WAKE_PIN is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
-void sleepISR() {
+// When RTC_WAKE_ALARM is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
+void realTimeClockWakeISR() {
 	// Prevent sleep mode, so we don'timeNow enter it again, except deliberately, by code
 	sleep_disable();
 
 	// Detach the interrupt that brought us out of sleep
-	detachInterrupt(digitalPinToInterrupt(RTC_WAKE_PIN));
+	detachInterrupt(digitalPinToInterrupt(RTC_WAKE_ALARM));
 
 	// Now we continue running the main Loop() just after we went to sleep
 }
 
 
-
-void openRelay(uint8_t pin)
+bool openRelay(uint8_t pin)
 {
-	Serial.println("opening relay");
-#if (RELAY_TYPE==PWM_RELAY)
-	for (int i = 254; i > 0; i--)
-	{
-		analogWrite(pin, i);
-		delay(4);
-	}
-#endif
-	digitalWrite(pin, LOW);
+	return openRelay(pin, false);
 }
 
 
-void closeRelay(uint8_t pin)
+bool openRelay(uint8_t pin, bool immediate)
+{
+	Serial.println("opening relay");
+#if (RELAY_TYPE==PWM_RELAY)
+	if (!immediate)
+	{
+		for (int i = 254; i > 0; i--)
+		{
+			analogWrite(pin, i);
+			delay(4);
+		}
+	}
+#endif
+	digitalWrite(pin, LOW);
+	return false;
+}
+
+
+bool closeRelay(uint8_t pin)
+{
+	return closeRelay(pin, false);
+}
+
+
+bool closeRelay(uint8_t pin, bool immediate)
 {
 	Serial.println("closing relay");
 #if (RELAY_TYPE==PWM_RELAY)
-	for (int i = 0; i < 255; i++)
+	if (!immediate)
 	{
-		analogWrite(pin, i);
-		delay(4);
+		for (int i = 0; i < 255; i++)
+		{
+			analogWrite(pin, i);
+			delay(4);
+		}
 	}
 #endif
 	digitalWrite(pin, HIGH);
+	return true;
 }
 
 
@@ -512,50 +534,4 @@ void printCharInHexadecimal(char* str, int len) {
 }
 
 
-
-void DoReportingTasks(ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds)
-{
-	DateTimeDS3231 timeNow;
-
-	DS3231_get(&timeNow);
-	int32_t secondsElapsed = dateDiffSeconds(&timeNow, &(reportControl->previousTime));
-
-	if (secondsElapsed >= reportingDelaySeconds)
-	{
-		reportControl->previousTime = timeNow;
-		lcd.clear();
-		switch (reportControl->reportingCycle)
-		{
-		case Report0:
-			lcd.setCursor(0, 1);
-			if (isPowerOutDisabled)
-			{
-				lcdPrint(lcd, "Power Off", 20);
-			}
-			else {
-				lcdPrint(lcd, "Power On", 20);
-			}
-			break;
-		case Report1:
-			lcd.setCursor(0, 1);
-			lcdPrint(lcd, "reportingCycle 1", 20);
-			break;
-		case Report2:
-			lcd.setCursor(0, 1);
-			lcdPrint(lcd, "reportingCycle 2", 20);
-			break;
-		case Report3:
-			lcd.setCursor(0, 1);
-			lcdPrint(lcd, "reportingCycle 3", 20);
-			break;
-		default:
-			break;
-		}
-		reportControl->reportingCycle++;
-		if (reportControl->reportingCycle >= EndOfReports)
-		{
-			reportControl->reportingCycle = FirstReport;
-		}
-	}
-}
 

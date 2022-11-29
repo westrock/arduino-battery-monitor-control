@@ -30,6 +30,8 @@
 #define LCD_DOWN_ARROW	1
 #define LCD_UP_ARROW	2
 
+void lcdClearLine(LiquidCrystal lcd, uint8_t line);
+
 uint8_t significantDigits(float floatNum);
 
 void CreateArrows(LiquidCrystal lcd);

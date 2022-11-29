@@ -22,6 +22,11 @@
  */
 #include "LCDHelper.h"
 
+void lcdClearLine(LiquidCrystal lcd, uint8_t line)
+{
+	lcd.setCursor(0, line);
+	lcdPrint(lcd, "", 20);
+}
 
 uint8_t significantDigits(float floatNum) {
 	int     intNum = fabs(floatNum);
@@ -47,24 +52,28 @@ void formatFloat(float voltage, char* buffer, uint8_t width, uint8_t precis) {
 	}
 }
 
+
 void lcdPrint(LiquidCrystal lcd, char* text, int padLength) {
 	int textLength = strlen(text);
 	int neededPadding;
 
-	if (textLength > padLength || textLength > 20) {
-		neededPadding = 0;
+	if (textLength == 0)
+	{
+		neededPadding = max(padLength, 20);
 	}
-	else {
-		neededPadding = max(padLength, 20) - strlen(text);
+	else
+	{
+		neededPadding = (textLength > padLength || textLength > 20) ? 0 : max(padLength, 20) - strlen(text);
+		lcd.print(text);
 	}
 
-	lcd.print(text);
-
-	if (neededPadding > 0) {
+	if (neededPadding > 0)
+	{
 		int i;
 		char padding[21];
 
-		for (i = 0; i < neededPadding; i++) {
+		for (i = 0; i < neededPadding; i++)
+		{
 			padding[i] = ' ';
 		}
 		padding[i] = 0;
@@ -72,6 +81,7 @@ void lcdPrint(LiquidCrystal lcd, char* text, int padLength) {
 		lcd.print(padding);
 	}
 }
+
 
 void CreateArrows(LiquidCrystal lcd) {
 	byte downArrow[8] = {

@@ -104,22 +104,20 @@
   <ItemGroup>
     <ClInclude Include="config.h" />
     <ClInclude Include="ds3231.h" />
-    <ClInclude Include="DataAcquisition.h" />
     <ClInclude Include="DateTimeHelpers.h" />
     <ClInclude Include="DS3231Helpers.h" />
     <ClInclude Include="HourlyDataTypes.h" />
     <ClInclude Include="LCDHelper.h" />
-    <ClInclude Include="ReportingHelpers.h" />
+    <ClInclude Include="DataAcquisitionAndReporting.h" />
     <ClInclude Include="__vm\.BatteryMonitorControl.vsarduino.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ds3231.cpp" />
-    <ClCompile Include="DataAcquisition.cpp" />
     <ClCompile Include="DateTimeHelpers.cpp" />
     <ClCompile Include="DS3231Helpers.cpp" />
     <ClCompile Include="HourlyDataTypes.cpp" />
     <ClCompile Include="LCDHelper.cpp" />
-    <ClCompile Include="ReportingHelpers.cpp" />
+    <ClCompile Include="DataAcquisitionAndReporting.cpp" />
   </ItemGroup>
   <PropertyGroup>
     <DebuggerFlavor>VisualMicroDebugger</DebuggerFlavor>
