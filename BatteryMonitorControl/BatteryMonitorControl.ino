@@ -17,7 +17,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
@@ -41,6 +41,18 @@
 +==========================*/
 #define VDIV_SCALE 4.588694								//
 #define VREG 5.0										//
+
+#define xDEBUGSERIALx
+
+#ifdef DEBUGSERIAL
+	#define DebugPrint(x) Serial.print(x)
+	#define DebugPrintln(x) Serial.println(x)
+	#define DebugFlush() Serial.flush()
+#else
+	#define DebugPrint(x) /*Serial.print(x);*/
+	#define DebugPrintln(x) /*Serial.println(x);*/
+	#define DebugFlush()	/*Serial.flush();*/
+#endif
 
 #ifdef USE_EXTERNALVREF
 	#define VREF_RESISTOR 7.7							//
@@ -120,7 +132,10 @@ void setup() {
 
 	// Start LCD and Serial
 	lcd.begin(20, 4);
+
+#ifdef DEBUGSERIAL
 	Serial.begin(9600);
+#endif
 
 	// Set the voltage-monitoring, temperature, button, and RTC alarm pins
 	pinMode(TEMP_SENSOR, INPUT);
@@ -145,16 +160,13 @@ void setup() {
 
 	CreateArrows(lcd);
 
-//	DoWakingTasks(&samplingData);
-
-	Serial.println("Setup completed.");
+	DebugPrintln("Setup completed.");
 }
 
 
 void loop()
 {
 	static bool firstTime = true;
-	bool wasReporting = false;
 	static byte prevADCSRA;
 	char buff[BUFF_MAX];
 
@@ -165,7 +177,7 @@ void loop()
 		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON), wakeSleepControlISR, LOW);
 		wakeSleepISRSet = true;
 		interrupts();
-		Serial.println("wakeSleepISRSet ACTIVATED");
+		DebugPrintln("wakeSleepISRSet ACTIVATED");
 	}
 
 	// Just blink LED twice to show we're running
@@ -175,23 +187,14 @@ void loop()
 	if (sleepRequested)
 	{
 		DoWakingTasks(&samplingData);
-		Serial.println("sleep REQUESTED");
+		DebugPrintln("sleep REQUESTED");
 
-		if (!wasReporting)
-		{
-			setAlarmAndSleep(RTC_WAKE_ALARM, realTimeClockWakeISR, preSleep, &prevADCSRA, 0, 0, 10);	// 0, 1, 0
-			postWakeISRCleanup(&prevADCSRA);
-		}
-		else
-		{
-			wasReporting = false;
-		}
-
+		setAlarmAndSleep(RTC_WAKE_ALARM, realTimeClockWakeISR, preSleep, &prevADCSRA, 0, 0, 10);	// 0, 1, 0
+		postWakeISRCleanup(&prevADCSRA);
 	}
 	else
 	{
 		DoReportingTasks(&samplingData, &reportControl, lcd, REPORTING_DELAY_SECONDS);
-		wasReporting = true;
 	}
 }
 
@@ -218,8 +221,8 @@ void doBlink(uint8_t ledPin) {
 
 void DisablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool *isRelayClosed, uint8_t powerRelay)
 {
-	Serial.print("*** ");
-	Serial.println("in DisablePower()");
+	DebugPrintln("in DisablePower()");
+
 	samplingData->isPowerOutDisabled = true;
 	samplingData->timeDisabled = *now;
 	if (*isRelayClosed)
@@ -230,8 +233,8 @@ void DisablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool *isRelay
 
 void EnablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool* isRelayClosed, uint8_t powerRelay)
 {
-	Serial.print("*** ");
-	Serial.println("in EnablePower()");
+	DebugPrintln("in EnablePower()");
+
 	samplingData->isPowerOutDisabled = false;
 	samplingData->isPowerOutRecovering = false;
 	samplingData->timeEnabled = *now;
@@ -244,8 +247,8 @@ void EnablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool* isRelayC
 
 void SetupRecovery(SamplingData* samplingData, DateTimeDS3231 *now, uint8_t recoveryDurationMinutes)
 {
-	Serial.print("*** ");
-	Serial.println("in SetupRecovery()");
+	DebugPrintln("in SetupRecovery()");
+
 	samplingData->isPowerOutRecovering = true;
 	samplingData->timeRecoveryStarted = *now;
 	samplingData->recoveryTime = *now;
@@ -254,8 +257,8 @@ void SetupRecovery(SamplingData* samplingData, DateTimeDS3231 *now, uint8_t reco
 
 void RecordTimeDisabled(SamplingData* samplingData, DateTimeDS3231 *now, uint16_t timeDisabledMinutes)
 {
-	Serial.print("*** ");
-	Serial.println("in RecordTimeDisabled()");
+	DebugPrintln("in RecordTimeDisabled()")
+
 	if (samplingData->timeDisabled.hour == now->hour)
 	{
 		samplingData->currentHourData.downMinutes += (timeDisabledMinutes > 60) ? 60 : timeDisabledMinutes; // Account for 24 hours+ downtime
@@ -283,7 +286,7 @@ void DoWakingTasks(SamplingData *samplingData)
 	uint16_t		minutesDisabled = 0;
 	static bool		tempSource = true;
 
-	Serial.println("Waking");
+	DebugPrintln("Waking");
 
 	DS3231_get(&timeNow);
 
@@ -293,13 +296,11 @@ void DoWakingTasks(SamplingData *samplingData)
 
 	if (scaledVoltage < DISABLE_VOLTAGE)
 	{
-		Serial.print("*** ");
-		Serial.println("scaledVoltage < DISABLE_VOLTAGE");
+		DebugPrintln("scaledVoltage < DISABLE_VOLTAGE");
 
 		if (!samplingData->isIntialized)
 		{
-			Serial.print("*** ");
-			Serial.println("!samplingData->isIntialized");
+			DebugPrintln("!samplingData->isIntialized");
 
 			samplingData->isPowerOutRecovering = false;
 			samplingData->isPowerOutDisabled = false;
@@ -327,13 +328,11 @@ void DoWakingTasks(SamplingData *samplingData)
 
 	if (scaledVoltage >= ENABLE_VOLTAGE)
 	{
-		Serial.print("*** ");
-		Serial.println("scaledVoltage > DISABLE_VOLTAGE");
+		DebugPrintln("scaledVoltage > DISABLE_VOLTAGE");
 
 		if (!samplingData->isIntialized)
 		{
-			Serial.print("*** ");
-			Serial.println("!samplingData->isIntialized");
+			DebugPrintln("!samplingData->isIntialized");
 
 			EnablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
 			samplingData->isIntialized = true;
@@ -359,7 +358,7 @@ void DoWakingTasks(SamplingData *samplingData)
 		}
 	}
 
-	Serial.flush();
+	DebugFlush();
 
 	if (timeNow.hour != samplingData->currentHour)
 	{
@@ -423,11 +422,12 @@ void CloseCurrentAndPrepNewHourWithSample(SamplingData *samplingData, DateTimeDS
 {
 	if (samplingData->currentHour != -1)
 	{
-		Serial.print("Closing current hour ");
-		Serial.print(samplingData->currentHour);
-		Serial.print(", minutesDisabled ");
-		Serial.println(minutesDisabled);
-		Serial.flush();
+		DebugPrint("Closing current hour ");
+		DebugPrint(samplingData->currentHour);
+		DebugPrint(", minutesDisabled ");
+		DebugPrintln(minutesDisabled);
+		DebugFlush();
+
 		if (samplingData->isPowerOutDisabled)
 		{
 			samplingData->currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled;
@@ -441,8 +441,8 @@ void CloseCurrentAndPrepNewHourWithSample(SamplingData *samplingData, DateTimeDS
 
 void preSleep() {
 	// Send a message just to show we are about to sleep
-	Serial.println("Going to sleep now.");
-	Serial.flush();
+	DebugPrintln("Going to sleep now.");
+	DebugFlush();
 }
 
 
@@ -481,7 +481,8 @@ bool openRelay(uint8_t pin)
 
 bool openRelay(uint8_t pin, bool immediate)
 {
-	Serial.println("opening relay");
+	DebugPrintln("opening relay");
+
 #if (RELAY_TYPE==PWM_RELAY)
 	if (!immediate)
 	{
@@ -505,7 +506,8 @@ bool closeRelay(uint8_t pin)
 
 bool closeRelay(uint8_t pin, bool immediate)
 {
-	Serial.println("closing relay");
+	DebugPrintln("closing relay");
+
 #if (RELAY_TYPE==PWM_RELAY)
 	if (!immediate)
 	{
@@ -525,12 +527,12 @@ void printCharInHexadecimal(char* str, int len) {
 	for (int i = 0; i < len; ++i) {
 		unsigned char val = str[i];
 		char tbl[] = "0123456789ABCDEF";
-		Serial.print("0x");
-		Serial.print(tbl[val / 16]);
-		Serial.print(tbl[val % 16]);
-		Serial.print(" ");
+		DebugPrint("0x");
+		DebugPrint(tbl[val / 16]);
+		DebugPrint(tbl[val % 16]);
+		DebugPrint(" ");
 	}
-	Serial.println();
+	DebugPrintln();
 }
 
 
