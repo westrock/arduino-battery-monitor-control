@@ -42,7 +42,7 @@
 #define VDIV_SCALE 4.588694								//
 #define VREG 5.0										//
 
-#define xDEBUGSERIALx
+#define DEBUGSERIAL
 
 #ifdef DEBUGSERIAL
 	#define DebugPrint(x) Serial.print(x)
@@ -62,12 +62,13 @@
 	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
 #endif
 
-#define TEMP_SENSOR				A0					// An LM34 thermometer
+#define TEMP_SENSOR				A3					// An LM34 thermometer
+#define MODE_SWITCH				A2					// Used as a digital switch in a companion app
 #define V5_SENSOR				A1					// This pin measures the VREF-limited external (battery) voltage
 #define VBATT_RELAY				9					// This relay allows current to flow in to the pin at V5_SENSOR
 
-#define WAKE_SLEEP_BUTTON		2					// When low, makes 328P go to sleep
-#define RTC_WAKE_ALARM			3					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define RTC_WAKE_ALARM			2					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define WAKE_SLEEP_BUTTON		3					// When low, makes 328P go to sleep
 #define LED_PIN					4					// output pin for the LED (to show it is awake)
 
 #define DISABLE_VOLTAGE			11.25
@@ -95,6 +96,19 @@
 		#error "RELAY_TYPE is not defined."
 #endif
 
+/*==========================+
+| Local structs				|
++==========================*/
+struct currentSampleStruct
+{
+	DateTimeDS3231	timeNow;
+	float			tempSample;
+	float			scaledVoltage;
+	uint16_t		minutesDisabled = 0;
+};
+typedef struct currentSampleStruct CurrentSample;
+
+
 /*========================+
 | Local Variables         |
 +========================*/
@@ -111,16 +125,22 @@ LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
 /*========================+
 | Function Definitions    |
 +========================*/
-void realTimeClockWakeISR();
-void preSleep();
+void doBlink(uint8_t ledPin);
+void DisablePower(SamplingData* samplingData, DateTimeDS3231* now, bool* isRelayClosed, uint8_t powerRelay);
+void EnablePower(SamplingData* samplingData, DateTimeDS3231* now, bool* isRelayClosed, uint8_t powerRelay);
+void SetupRecovery(SamplingData* samplingData, DateTimeDS3231* now, uint8_t recoveryDurationMinutes);
+void RecordTimeDisabled(SamplingData* samplingData, CurrentSample* currentSample);
 void DoWakingTasks(SamplingData * samplingData);
-void CloseCurrentAndPrepNewHourWithSample(SamplingData* samplingData, DateTimeDS3231* now, uint16_t minutesDisabled, uint16_t* rawVoltage, float* temperature);
+void DisplayCurrentStatus(SamplingData* samplingData, CurrentSample* currentSample);
+void CloseCurrentAndPrepNewHourWithSample(SamplingData* samplingData, CurrentSample* currentSample, uint16_t* rawVoltage);
+void preSleep();
+void wakeSleepControlISR();
+void realTimeClockWakeISR();
 bool openRelay(uint8_t pin);
 bool openRelay(uint8_t pin, bool immediate);
 bool closeRelay(uint8_t pin);
 bool closeRelay(uint8_t pin, bool immediate);
 void printCharInHexadecimal(char* str, int len);
-void doBlink(uint8_t ledPin);
 
 
 void setup() {
@@ -160,7 +180,7 @@ void setup() {
 
 	CreateArrows(lcd);
 
-	DebugPrintln("Setup completed.");
+	DebugPrintln(F("Setup completed."));
 }
 
 
@@ -177,7 +197,7 @@ void loop()
 		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON), wakeSleepControlISR, LOW);
 		wakeSleepISRSet = true;
 		interrupts();
-		DebugPrintln("wakeSleepISRSet ACTIVATED");
+		DebugPrintln(F("wakeSleepISRSet ACTIVATED"));
 	}
 
 	// Just blink LED twice to show we're running
@@ -187,7 +207,7 @@ void loop()
 	if (sleepRequested)
 	{
 		DoWakingTasks(&samplingData);
-		DebugPrintln("sleep REQUESTED");
+		DebugPrintln(F("sleep REQUESTED"));
 
 		setAlarmAndSleep(RTC_WAKE_ALARM, realTimeClockWakeISR, preSleep, &prevADCSRA, 0, 0, 10);	// 0, 1, 0
 		postWakeISRCleanup(&prevADCSRA);
@@ -221,7 +241,7 @@ void doBlink(uint8_t ledPin) {
 
 void DisablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool *isRelayClosed, uint8_t powerRelay)
 {
-	DebugPrintln("in DisablePower()");
+	DebugPrintln(F("in DisablePower()"));
 
 	samplingData->isPowerOutDisabled = true;
 	samplingData->timeDisabled = *now;
@@ -233,7 +253,7 @@ void DisablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool *isRelay
 
 void EnablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool* isRelayClosed, uint8_t powerRelay)
 {
-	DebugPrintln("in EnablePower()");
+	DebugPrintln(F("in EnablePower()"));
 
 	samplingData->isPowerOutDisabled = false;
 	samplingData->isPowerOutRecovering = false;
@@ -247,60 +267,66 @@ void EnablePower(SamplingData* samplingData, DateTimeDS3231 *now, bool* isRelayC
 
 void SetupRecovery(SamplingData* samplingData, DateTimeDS3231 *now, uint8_t recoveryDurationMinutes)
 {
-	DebugPrintln("in SetupRecovery()");
+	DebugPrintln(F("in SetupRecovery()"));
 
 	samplingData->isPowerOutRecovering = true;
 	samplingData->timeRecoveryStarted = *now;
 	samplingData->recoveryTime = *now;
 	addMinutes(&samplingData->recoveryTime, recoveryDurationMinutes);
+	DebugPrint(F("Will recover in "));
+	DebugPrint(recoveryDurationMinutes);
+	DebugPrintln(F(" minutes"));
+	DebugPrintln(samplingData->isPowerOutRecovering);
 }
 
-void RecordTimeDisabled(SamplingData* samplingData, DateTimeDS3231 *now, uint16_t timeDisabledMinutes)
+void RecordTimeDisabled(SamplingData* samplingData, CurrentSample *currentSample)
 {
-	DebugPrintln("in RecordTimeDisabled()")
+	DebugPrintln(F("in RecordTimeDisabled()"));
 
-	if (samplingData->timeDisabled.hour == now->hour)
+	if (samplingData->timeDisabled.hour == currentSample->timeNow.hour)
 	{
-		samplingData->currentHourData.downMinutes += (timeDisabledMinutes > 60) ? 60 : timeDisabledMinutes; // Account for 24 hours+ downtime
+		samplingData->currentHourData.downMinutes += (currentSample->minutesDisabled > 60) ? 60 : currentSample->minutesDisabled; // Account for 24 hours+ downtime
 	}
 	else
 	{
 		// The power was disabled in an earlier hour - it crossed hour boundaries.
-		if (now->hour == samplingData->currentHour)
+		if (currentSample->timeNow.hour == samplingData->currentHour)
 		{
-			samplingData->currentHourData.downMinutes += now->min;
+			samplingData->currentHourData.downMinutes += currentSample->timeNow.min;
 		}
 	}
 }
 
 
+
 void DoWakingTasks(SamplingData *samplingData)
 {
-	DateTimeDS3231	timeNow;
+	CurrentSample	currentSample;
+	//DateTimeDS3231	timeNow;
 	char			voltStr[6];
 	char			tempStr[6];
 	char			buffer[20];
-	float			tempSample;
-	float			scaledVoltage;
+	//float			tempSample;
+	//float			scaledVoltage;
 	uint16_t		rawVoltageSample;
-	uint16_t		minutesDisabled = 0;
+	//uint16_t		minutesDisabled = 0;
 	static bool		tempSource = true;
 
-	DebugPrintln("Waking");
+	DebugPrintln(F("Waking"));
 
-	DS3231_get(&timeNow);
+	DS3231_get(&currentSample.timeNow);
 
-	tempSample = GetAverageDS3231Temp(3, 5);
+	currentSample.tempSample = GetAverageDS3231Temp(3, 5);
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
-	scaledVoltage = rawVoltageSample * VREFSCALE;
+	currentSample.scaledVoltage = rawVoltageSample * VREFSCALE;
 
-	if (scaledVoltage < DISABLE_VOLTAGE)
+	if (currentSample.scaledVoltage < DISABLE_VOLTAGE)
 	{
-		DebugPrintln("scaledVoltage < DISABLE_VOLTAGE");
+		DebugPrintln(F("scaledVoltage < DISABLE_VOLTAGE"));
 
 		if (!samplingData->isIntialized)
 		{
-			DebugPrintln("!samplingData->isIntialized");
+			DebugPrintln(F("!samplingData->isIntialized"));
 
 			samplingData->isPowerOutRecovering = false;
 			samplingData->isPowerOutDisabled = false;
@@ -310,7 +336,7 @@ void DoWakingTasks(SamplingData *samplingData)
 		{
 			if (!samplingData->isPowerOutDisabled)
 			{
-				DisablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
+				DisablePower(samplingData, &currentSample.timeNow, &isOutputRelayClosed, VBATT_RELAY);
 			}
 
 			if (samplingData->isPowerOutRecovering)
@@ -323,18 +349,18 @@ void DoWakingTasks(SamplingData *samplingData)
 
 	if (samplingData->isPowerOutDisabled)
 	{
-		minutesDisabled = dateDiffMinutes(&timeNow, &samplingData->timeDisabled);
+		currentSample.minutesDisabled = dateDiffMinutes(&currentSample.timeNow, &samplingData->timeDisabled);
 	}
 
-	if (scaledVoltage >= ENABLE_VOLTAGE)
+	if (currentSample.scaledVoltage >= ENABLE_VOLTAGE)
 	{
-		DebugPrintln("scaledVoltage > DISABLE_VOLTAGE");
+		DebugPrintln(F("scaledVoltage >= ENABLE_VOLTAGE"));
 
 		if (!samplingData->isIntialized)
 		{
-			DebugPrintln("!samplingData->isIntialized");
+			DebugPrintln(F("!samplingData->isIntialized"));
 
-			EnablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
+			EnablePower(samplingData, &currentSample.timeNow, &isOutputRelayClosed, VBATT_RELAY);
 			samplingData->isIntialized = true;
 		}
 		else
@@ -343,14 +369,19 @@ void DoWakingTasks(SamplingData *samplingData)
 			{
 				if (!samplingData->isPowerOutRecovering)
 				{
-					SetupRecovery(samplingData, &timeNow, ENABLE_WAIT_MINUTES);
+					SetupRecovery(samplingData, &currentSample.timeNow, ENABLE_WAIT_MINUTES);
 				}
 				else
 				{
-					if (dateDiffSeconds(&timeNow, &samplingData->timeRecoveryStarted) >= ENABLE_WAIT_MINUTES * 60)
+					int32_t secondsSpentRecovering = dateDiffSeconds(&currentSample.timeNow, &samplingData->timeRecoveryStarted);
+
+					DebugPrint(F("Seconds Spent Recovering: "));
+					DebugPrintln(secondsSpentRecovering);
+
+					if (secondsSpentRecovering >= ENABLE_WAIT_MINUTES * 60)
 					{
-						RecordTimeDisabled(samplingData, &timeNow, minutesDisabled);
-						EnablePower(samplingData, &timeNow, &isOutputRelayClosed, VBATT_RELAY);
+						RecordTimeDisabled(samplingData, &currentSample);
+						EnablePower(samplingData, &currentSample.timeNow, &isOutputRelayClosed, VBATT_RELAY);
 						lcd.clear();
 					}
 				}
@@ -358,29 +389,46 @@ void DoWakingTasks(SamplingData *samplingData)
 		}
 	}
 
+	//if (samplingData->isPowerOutRecovering && (currentSample.scaledVoltage >= DISABLE_VOLTAGE || currentSample.scaledVoltage < ENABLE_VOLTAGE))
+	//{
+	//	samplingData->isPowerOutRecovering = false;
+	//	lcdClearLine(lcd, 2);
+	//}
+
 	DebugFlush();
 
-	if (timeNow.hour != samplingData->currentHour)
+	if (currentSample.timeNow.hour != samplingData->currentHour)
 	{
-		CloseCurrentAndPrepNewHourWithSample(samplingData, &timeNow, minutesDisabled, &rawVoltageSample, &tempSample);
+		CloseCurrentAndPrepNewHourWithSample(samplingData, &currentSample, &rawVoltageSample);
 	}
 	else
 	{
-		AddSampleToCurrentHour(&samplingData->currentHourData, &timeNow, &rawVoltageSample, &tempSample);
+		AddSampleToCurrentHour(&samplingData->currentHourData, &currentSample.timeNow, &rawVoltageSample, &currentSample.tempSample);
 	}
 
-	formatFloat(scaledVoltage, voltStr, 5, 2);
-	formatFloat(tempSample, tempStr, 5, 1);
+	DisplayCurrentStatus(samplingData, &currentSample);
+
+}
+
+
+void DisplayCurrentStatus(SamplingData *samplingData, CurrentSample *currentSample)
+{
+	char			buffer[20];
+	char			voltStr[6];
+	char			tempStr[6];
+
+	formatFloat(currentSample->scaledVoltage, voltStr, 5, 2);
+	formatFloat(currentSample->tempSample, tempStr, 5, 1);
 
 	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
-	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, timeNow.hour, timeNow.min);
+	sprintf(buffer, "%sv %s%c %02d:%02d", voltStr, tempStr, 0xDF, currentSample->timeNow.hour, currentSample->timeNow.min);
 	lcd.setCursor(0, 0);
 	lcdPrint(lcd, buffer, 20);
 
 	lcd.setCursor(0, 1);
 	if (samplingData->isPowerOutDisabled)
 	{
-		sprintf(buffer, "Power off %d mins", minutesDisabled);
+		sprintf(buffer, "Power off %d mins", currentSample->minutesDisabled);
 	}
 	else
 	{
@@ -391,64 +439,46 @@ void DoWakingTasks(SamplingData *samplingData)
 
 	if (samplingData->isPowerOutRecovering)
 	{
-		ElapsedTime timeToRecover = dateDiff(&timeNow, &samplingData->recoveryTime);
+		ElapsedTime timeToRecover = dateDiff(&currentSample->timeNow, &samplingData->recoveryTime);
 		lcd.setCursor(0, 2);
 		sprintf(buffer, "Recovery in %2d:%02d", abs(timeToRecover.minute), abs(timeToRecover.second));
 		lcdPrint(lcd, buffer, 20);
 	}
-
-	sprintf(buffer, "        ");
-	buffer[0] = (byte)LCD_DOWN_ARROW;
-	buffer[2] = (byte)LCD_UP_ARROW;
-	buffer[4] = (byte)LCD_DOWN_ARROW;
-	buffer[6] = (byte)LCD_UP_ARROW;
-	lcd.setCursor(0, 3);
-	lcd.write(buffer, strlen(buffer));
-	//lcdPrint(lcd, buffer, 20);
-
-	//sprintf(buffer, "V: %s T%d: %s", voltStr, tempSource + 1, tempStr);
-	//sprintf(buffer, "%s%c", tempStr, 0xDF);
-	//lcd.setCursor(0, 1);
-	//lcdPrint(lcd, buffer, 20);
-
-	// display current time
-	//snprintf(buffer, 20, "%02d/%02d/%02d %02d:%02d:%02d", timeNow.year_s, timeNow.mon, timeNow.mday, timeNow.hour, timeNow.min, timeNow.sec);
-
-	//lcd.setCursor(0, 1);
-	//lcdPrint(lcd, buffer, 20);
 }
 
-void CloseCurrentAndPrepNewHourWithSample(SamplingData *samplingData, DateTimeDS3231 *now, uint16_t minutesDisabled, uint16_t *rawVoltage, float *temperature)
+void CloseCurrentAndPrepNewHourWithSample(SamplingData *samplingData, CurrentSample *currentSample, uint16_t *rawVoltage)
 {
 	if (samplingData->currentHour != -1)
 	{
-		DebugPrint("Closing current hour ");
+		DebugPrint(F("Closing current hour "));
 		DebugPrint(samplingData->currentHour);
-		DebugPrint(", minutesDisabled ");
-		DebugPrintln(minutesDisabled);
+		DebugPrint(F(", minutesDisabled "));
+		DebugPrintln(currentSample->minutesDisabled);
 		DebugFlush();
 
 		if (samplingData->isPowerOutDisabled)
 		{
-			samplingData->currentHourData.downMinutes += (minutesDisabled > 60) ? 60 : minutesDisabled;
+			samplingData->currentHourData.downMinutes += (currentSample->minutesDisabled > 60) ? 60 : currentSample->minutesDisabled;
 		}
 		CloseCurrentHour(samplingData->hourlyData, &samplingData->currentHourData, samplingData->currentHour % DATA_HOURS);
 	}
-	PrepCurrentHour(&samplingData->currentHourData, now, rawVoltage, temperature);
-	samplingData->currentHour = now->hour;
+	PrepCurrentHour(&samplingData->currentHourData, &currentSample->timeNow, rawVoltage, &currentSample->tempSample);
+	samplingData->currentHour = currentSample->timeNow.hour;
 }
 
 
-void preSleep() {
+void preSleep()
+{
 	// Send a message just to show we are about to sleep
-	DebugPrintln("Going to sleep now.");
+	DebugPrintln(F("Going to sleep now."));
 	DebugFlush();
 }
 
 
 
 // When WAKE_SLEEP_BUTTON is brought LOW this interrupt is triggered
-void wakeSleepControlISR() {
+void wakeSleepControlISR()
+{
 	// Detach the interrupt that brought us here
 	detachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON));
 	sleepRequested = !sleepRequested;
@@ -481,7 +511,7 @@ bool openRelay(uint8_t pin)
 
 bool openRelay(uint8_t pin, bool immediate)
 {
-	DebugPrintln("opening relay");
+	DebugPrintln(F("opening relay"));
 
 #if (RELAY_TYPE==PWM_RELAY)
 	if (!immediate)
@@ -506,7 +536,7 @@ bool closeRelay(uint8_t pin)
 
 bool closeRelay(uint8_t pin, bool immediate)
 {
-	DebugPrintln("closing relay");
+	DebugPrintln(F("closing relay"));
 
 #if (RELAY_TYPE==PWM_RELAY)
 	if (!immediate)
@@ -527,10 +557,10 @@ void printCharInHexadecimal(char* str, int len) {
 	for (int i = 0; i < len; ++i) {
 		unsigned char val = str[i];
 		char tbl[] = "0123456789ABCDEF";
-		DebugPrint("0x");
+		DebugPrint(F("0x"));
 		DebugPrint(tbl[val / 16]);
 		DebugPrint(tbl[val % 16]);
-		DebugPrint(" ");
+		DebugPrint(F(" "));
 	}
 	DebugPrintln();
 }
