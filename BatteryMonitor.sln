@@ -5,9 +5,9 @@ VisualStudioVersion = 17.3.32929.385
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BatteryMonitorControl", "BatteryMonitorControl\BatteryMonitorControl.vcxproj", "{BD5D546E-F254-4347-A4A4-A874EA335129}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BatteryCalibrate", "BatteryCalibrate\BatteryCalibrate.vcxproj", "{C5F80730-F44F-4478-BDAE-6634EFC2CA88}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VrefScaleSetup", "VrefScaleSetup\VrefScaleSetup.vcxproj", "{1226B026-5EAC-40C2-8884-3DF90E683A3C}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EEPROM-2.0", "..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\EEPROM-2.0.vcxitems", "{04930C1A-3BA8-4910-8955-FE5EE514970D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -31,18 +31,6 @@ Global
 		{BD5D546E-F254-4347-A4A4-A874EA335129}.Release|ARM64.Build.0 = Release|Win32
 		{BD5D546E-F254-4347-A4A4-A874EA335129}.Release|x86.ActiveCfg = Release|Win32
 		{BD5D546E-F254-4347-A4A4-A874EA335129}.Release|x86.Build.0 = Release|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Debug|ARM.ActiveCfg = Debug|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Debug|ARM.Build.0 = Debug|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Debug|ARM64.ActiveCfg = Debug|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Debug|ARM64.Build.0 = Debug|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Debug|x86.ActiveCfg = Debug|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Debug|x86.Build.0 = Debug|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Release|ARM.ActiveCfg = Release|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Release|ARM.Build.0 = Release|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Release|ARM64.ActiveCfg = Release|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Release|ARM64.Build.0 = Release|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Release|x86.ActiveCfg = Release|Win32
-		{C5F80730-F44F-4478-BDAE-6634EFC2CA88}.Release|x86.Build.0 = Release|Win32
 		{1226B026-5EAC-40C2-8884-3DF90E683A3C}.Debug|ARM.ActiveCfg = Debug|ARM
 		{1226B026-5EAC-40C2-8884-3DF90E683A3C}.Debug|ARM.Build.0 = Debug|ARM
 		{1226B026-5EAC-40C2-8884-3DF90E683A3C}.Debug|ARM.Deploy.0 = Debug|ARM
@@ -67,5 +55,10 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {E0EF313F-CB38-45B7-B556-EB9E1947E747}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\EEPROM-2.0.vcxitems*{04930c1a-3ba8-4910-8955-fe5ee514970d}*SharedItemsImports = 9
+		..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\EEPROM-2.0.vcxitems*{1226b026-5eac-40c2-8884-3df90e683a3c}*SharedItemsImports = 4
+		..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\EEPROM-2.0.vcxitems*{bd5d546e-f254-4347-a4a4-a874ea335129}*SharedItemsImports = 4
 	EndGlobalSection
 EndGlobal
