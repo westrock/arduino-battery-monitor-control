@@ -4,6 +4,7 @@
  Author:	efigarsky
 */
 
+#include <EEPROM.h>
 #include <LiquidCrystal.h>
 #include "LCDHelper.h"
 
@@ -12,11 +13,22 @@
 /*==========================+
 |	#defines				|
 +==========================*/
-#define VDIV_SCALE 4.588694								//
-#define VREG 5.0										//
-#define VREFSCALE(x) VREG / 1024.0 * (x)				//
+#define USE_EXTERNALVREF
+#define VREF_RESISTOR	14.92									//
+#define VREG			4.982									//
 
-#define DEBUGSERIAL
+
+#ifdef USE_EXTERNALVREF
+#define VDIV_SCALE		4.477983								//
+#define VREF			VREG * 32 / (32 + VREF_RESISTOR)		//
+#define VREFSCALE(x)	VREF / 1024.0 * (x)						//
+#else
+#define VDIV_SCALE		4.718196								//
+#define VREFSCALE(x)	VREG / 1024.0 * (x)						//
+#endif
+
+
+#define DEBUGSERIALx
 
 #ifdef DEBUGSERIAL
 #define DebugPrint(x) Serial.print(x)
@@ -31,27 +43,35 @@
 #define MODE_SWITCH				A2					// Used as a digital switch in a companion app
 #define V5_SENSOR				A1					// This pin measures the VREF-limited external (battery) voltage
 
-#define WAKE_SLEEP_BUTTON		3					// When low, makes 328P go to sleep
+#define WAKE_SLEEP_BUTTON		2					// When low, makes 328P go to sleep
 #define LED_PIN					4					// output pin for the LED (to show it is awake)
 
 
 /*========================+
 | enums			          |
 +========================*/
-enum buttonState	{ STATE_NOT_SET = 0, STATE_WENT_LOW = 1, STATE_WENT_HIGH = 2, STATE_WAS_PRESSED = 3 };
-enum pressType		{ PRESS_NOT_SET = 0, PRESS_LONG = 1, PRESS_SHORT = 2 };
+enum BUTTON_STATE_ENUM	{ STATE_NOT_SET = 0, STATE_LOW_ENABLED, STATE_WENT_LOW, STATE_HIGH_ENABLED, STATE_WENT_HIGH, STATE_WAS_PRESSED, STATE_ILLEGAL_STATE = 255 };
+enum PRESS_TYPE_ENUM	{ PRESS_NOT_SET = 0, PRESS_LONG = 1, PRESS_SHORT = 2 };
 
+void LcdPrintState(LiquidCrystal lcd, uint8_t state);
+void SerialPrintState(uint8_t state);
 
 /*========================+
 | Local Variables         |
 +========================*/
-volatile bool	isLongPress = false;
-volatile bool	buttonPressed = false;
-volatile bool	wakeSleepISRSet = false;
-volatile float	vDivScale = VDIV_SCALE;
+volatile uint8_t	errorStateOld = STATE_NOT_SET;
+volatile uint8_t	errorStateNew = STATE_NOT_SET;
+volatile uint32_t	buttonDownMillis = 0;
+volatile uint8_t	buttonState = STATE_NOT_SET;
+volatile uint8_t	pressType = PRESS_NOT_SET;
+volatile bool		isLongPress = false;
+volatile bool		buttonPressed = false;
+volatile bool		wakeSleepISRSet = false;
+volatile float		vDivScale;
 
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
+uint32_t		lastDisplayMillis = 0;
 
 /*========================+
 | Function Definitions    |
@@ -70,7 +90,11 @@ void delay1(unsigned long ms);
 
 // the setup function runs once when you press reset or power the board
 void setup() {
+#ifdef USE_EXTERNALVREF
+	analogReference(EXTERNAL);
+#else
 	analogReference(DEFAULT);
+#endif
 
 	// Start LCD and Serial
 	lcd.begin(20, 4);
@@ -84,6 +108,17 @@ void setup() {
 	pinMode(WAKE_SLEEP_BUTTON, INPUT_PULLUP);
 	pinMode(MODE_SWITCH, INPUT_PULLUP);
 
+	EEPROM.get(0, vDivScale);
+
+	DebugPrint("eeprom value: ");
+	DebugPrintln(vDivScale);
+	if (vDivScale != vDivScale)
+	{
+		vDivScale = VDIV_SCALE;
+	}
+	DebugPrint("vDivScale: ");
+	DebugPrintln(vDivScale);
+
 	CreateArrows(lcd);
 }
 
@@ -94,76 +129,95 @@ void loop() {
 
 	// Just blink LED twice to show we're running
 	int modeSwitchValue = digitalRead(MODE_SWITCH);
-	lcd.setCursor(0, 3);
-	lcd.write((modeSwitchValue == 0) ? (byte) LCD_DOWN_ARROW : (byte)LCD_UP_ARROW);
 
-	// Has the button on the "go to sleep" pin been toggled?
-	if (buttonPressed)
+	switch (buttonState)
 	{
-		buttonPressed = false;
-		if (isLongPress)
+	case STATE_LOW_ENABLED:
+		break;
+	case STATE_WENT_LOW:
+		buttonDownMillis = millis();
+		delay1(1);
+		noInterrupts();
+		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON), wakeSleepHighISR, HIGH);
+		buttonState = STATE_HIGH_ENABLED;
+		interrupts();
+		DebugPrintln(F("wakeSleepHighISR ACTIVATED"));
+		break;
+	case STATE_HIGH_ENABLED:
+		break;
+	case STATE_WENT_HIGH:
+		pressType = (millis() - buttonDownMillis > 2000) ? PRESS_LONG : PRESS_SHORT;
+		buttonDownMillis = 0;
+		buttonState = STATE_WAS_PRESSED;
+		break;
+	case STATE_WAS_PRESSED:
+		if (pressType == PRESS_SHORT)
 		{
-			isLongPress = false;
-			HandleLongPress(vDivScale);
+			vDivScale += (modeSwitchValue == 0) ? -0.002002 : 0.002002;
 		}
 		else
 		{
-			vDivScale += (modeSwitchValue == 0) ? -0.000002 : 0.000002;
+			HandleLongPress(vDivScale);
 		}
-	}
-
-	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
-	scaledVoltage = rawVoltageSample * VREFSCALE(vDivScale);
-
-	DisplayCurrentStatus(vDivScale, rawVoltageSample, scaledVoltage);
-
-
-	if (!wakeSleepISRSet)
-	{
-		// Wake/Sleep Interrupts are not set up or were disabled. Set up the button
+		buttonState = STATE_NOT_SET;
+		break;
+ 	case STATE_NOT_SET:
 		noInterrupts();
 		attachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON), wakeSleepLowISR, LOW);
-		wakeSleepISRSet = true;
+		buttonState = STATE_LOW_ENABLED;
 		interrupts();
-		DebugPrintln(F("wakeSleepISRSet ACTIVATED"));
+		DebugPrintln(F("wakeSleepLowISR ACTIVATED"));
+		break;
+	case STATE_ILLEGAL_STATE:
+		lcd.clear();
+		lcd.setCursor(0,0);
+		lcd.print(F("ILLEGAL STATE"));
+		lcd.setCursor(0, 1);
+		lcd.print(F("OLD: "));
+		LcdPrintState(lcd, errorStateOld);
+			lcd.setCursor(0, 2);
+		lcd.print(F("NEW: "));
+		LcdPrintState(lcd, errorStateNew);
+		break;
+	default:
+		break;
+	};
+
+	if (buttonState == STATE_LOW_ENABLED)
+	{
+		lcd.setCursor(0, 3);
+		lcd.write((modeSwitchValue == 0) ? (byte)LCD_DOWN_ARROW : (byte)LCD_UP_ARROW);
+
+		rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
+		scaledVoltage = rawVoltageSample * VREFSCALE(vDivScale);
+
+		DisplayCurrentStatus(vDivScale, rawVoltageSample, scaledVoltage);
+
+		doBlink(LED_PIN);
+		delay1(500);
 	}
-
-
-
-	doBlink(LED_PIN);
-	delay1(500);
-	}
+}
 
 
 
 
-// When WAKE_SLEEP_BUTTON is brought LOW this interrupt is triggered
+// When WAKE_SLEEP_BUTTON is brought LOW (ie pushed) this interrupt is triggered
 void wakeSleepLowISR()
 {
 	// Detach the interrupt that brought us here
 	detachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON));
-	buttonPressed = true;
-	wakeSleepISRSet = false;
 
-	delay1(5);
-	unsigned long time = 5;
-	while (digitalRead(WAKE_SLEEP_BUTTON) == LOW) {
-		delay1(5);
-		time += 1;
+	if (buttonState == STATE_LOW_ENABLED)
+	{
+		buttonState = STATE_WENT_LOW;
 	}
-
-	Serial.print("time: ");
-	Serial.print(time);
-	Serial.println();
-
-	isLongPress = (time / 1000 >= 2);
-
-	Serial.print("time / 1000: ");
-	Serial.print(time / 1000);
-	Serial.println();
-	Serial.print("isLongPress: ");
-	Serial.print(isLongPress);
-	Serial.println();
+	else
+	{
+		buttonState = STATE_ILLEGAL_STATE;
+		errorStateOld = buttonState;
+		errorStateNew = STATE_WENT_LOW;
+	}
+	delay1(5);
 }
 
 
@@ -174,28 +228,18 @@ void wakeSleepHighISR()
 {
 	// Detach the interrupt that brought us here
 	detachInterrupt(digitalPinToInterrupt(WAKE_SLEEP_BUTTON));
-	buttonPressed = true;
-	wakeSleepISRSet = false;
 
-	delay1(5);
-	unsigned long time = 5;
-	while (digitalRead(WAKE_SLEEP_BUTTON) == LOW) {
-		delay1(5);
-		time += 1;
+	if (buttonState == STATE_HIGH_ENABLED)
+	{
+		buttonState = STATE_WENT_HIGH;
 	}
-
-	Serial.print("time: ");
-	Serial.print(time);
-	Serial.println();
-
-	isLongPress = (time / 1000 >= 2);
-
-	Serial.print("time / 1000: ");
-	Serial.print(time / 1000);
-	Serial.println();
-	Serial.print("isLongPress: ");
-	Serial.print(isLongPress);
-	Serial.println();
+	else
+	{
+		buttonState = STATE_ILLEGAL_STATE;
+		errorStateOld = buttonState;
+		errorStateNew = STATE_WENT_HIGH;
+	}
+	delay1(5);
 }
 
 
@@ -259,6 +303,8 @@ void DisplayCurrentStatus(float scale, float rawValue, float scaledValue)
 
 void HandleLongPress(float vDivScale)
 {
+	EEPROM.put(0, vDivScale);
+
 	lcd.clear();
 	lcd.setCursor(0, 1);
 	lcd.print("        LONG        ");
@@ -284,4 +330,66 @@ void delay1(unsigned long ms)
 			start = micros() & 0xFFFFFF00;
 		}
 	}
+}
+
+void LcdPrintState(LiquidCrystal lcd, uint8_t state)
+{
+	switch (state)
+	{
+	case STATE_LOW_ENABLED:
+		lcd.print(F("LOW_ENABLED"));
+		break;
+	case STATE_WENT_LOW:
+		lcd.print(F("WENT_LOW"));
+		break;
+	case STATE_HIGH_ENABLED:
+		lcd.print(F("HIGH_ENABLED"));
+		break;
+	case STATE_WENT_HIGH:
+		lcd.print(F("WENT_HIGH"));
+		break;
+	case STATE_WAS_PRESSED:
+		lcd.print(F("WAS_PRESSED"));
+		break;
+	case STATE_NOT_SET:
+		lcd.print(F("NOT_SET"));
+		break;
+	case STATE_ILLEGAL_STATE:
+		lcd.print(F("ILLEGAL_STATE"));
+		break;
+	default:
+		lcd.print(F("UNKNOWN"));
+		break;
+	};
+}
+
+void SerialPrintState(uint8_t state)
+{
+	switch (state)
+	{
+	case STATE_LOW_ENABLED:
+		Serial.print(F("LOW_ENABLED"));
+		break;
+	case STATE_WENT_LOW:
+		Serial.print(F("WENT_LOW"));
+		break;
+	case STATE_HIGH_ENABLED:
+		Serial.print(F("HIGH_ENABLED"));
+		break;
+	case STATE_WENT_HIGH:
+		Serial.print(F("WENT_HIGH"));
+		break;
+	case STATE_WAS_PRESSED:
+		Serial.print(F("WAS_PRESSED"));
+		break;
+	case STATE_NOT_SET:
+		Serial.print(F("NOT_SET"));
+		break;
+	case STATE_ILLEGAL_STATE:
+		Serial.print(F("ILLEGAL_STATE"));
+		break;
+	default:
+		Serial.print(F("UNKNOWN"));
+		break;
+	};
 }

@@ -38,7 +38,9 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
-  <ImportGroup Label="Shared" />
+  <ImportGroup Label="Shared">
+    <Import Project="..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\EEPROM-2.0.vcxitems" Label="Shared" />
+  </ImportGroup>
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
     <LinuxIncludePath>c:\visualmicro\ignore</LinuxIncludePath>
@@ -48,6 +50,7 @@
     <ClCompile Include="..\BatteryMonitorControl\LCDHelper.cpp" />
     <ClCompile Include="VrefScaleSetup.ino">
       <FileType>CppCode</FileType>
+      <DeploymentContent>true</DeploymentContent>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -61,20 +64,20 @@
     <DebuggerFlavor>VisualMicroDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
-    <IncludePath>$(ProjectDir)..\VrefScaleSetup;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.5\cores\arduino;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.5\variants\standard;$(ProjectDir)..\..\..\..\..\..\Program Files (x86)\Arduino\libraries\LiquidCrystal\src;$(ProjectDir)..\BatteryMonitorControl;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include-fixed;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\avr\include</IncludePath>
-    <RemoteCCompileToolExe>$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\bin\avr-g++</RemoteCCompileToolExe>
-    <RemoteCppCompileToolExe>$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\bin\avr-g++</RemoteCppCompileToolExe>
+    <IncludePath>$(ProjectDir)..\VrefScaleSetup;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\src;$(ProjectDir)..\..\..\..\..\..\Program Files (x86)\Arduino\libraries\LiquidCrystal\src;$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\hardware\\avr\\1.8.6\\cores\\arduino;$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\hardware\\avr\\1.8.6\\variants\\standard;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include-fixed;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\avr\include;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\src;$(ProjectDir)..\..\..\..\..\..\Program Files (x86)\Arduino\libraries\LiquidCrystal\src;$(ProjectDir)..\BatteryMonitorControl</IncludePath>
+    <RemoteCCompileToolExe>$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\tools\\avr-gcc\\7.3.0-atmel3.6.1-arduino7\bin\avr-g++</RemoteCCompileToolExe>
+    <RemoteCppCompileToolExe>$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\tools\\avr-gcc\\7.3.0-atmel3.6.1-arduino7\bin\avr-g++</RemoteCppCompileToolExe>
     <ValidateArchitecture>false</ValidateArchitecture>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\VrefScaleSetup;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.5\cores\arduino;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.5\variants\standard;$(ProjectDir)..\..\..\..\..\..\Program Files (x86)\Arduino\libraries\LiquidCrystal\src;$(ProjectDir)..\BatteryMonitorControl;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include-fixed;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\avr\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <GccToolChain>$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\bin\avr-g++</GccToolChain>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\VrefScaleSetup;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\src;$(ProjectDir)..\..\..\..\..\..\Program Files (x86)\Arduino\libraries\LiquidCrystal\src;$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\hardware\\avr\\1.8.6\\cores\\arduino;$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\hardware\\avr\\1.8.6\\variants\\standard;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\lib\gcc\avr\7.3.0\include-fixed;$(ProjectDir)..\..\..\..\appdata\local\arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\avr\include;$(ProjectDir)..\..\..\..\AppData\Local\arduino15\packages\arduino\hardware\avr\1.8.6\libraries\EEPROM\src;$(ProjectDir)..\..\..\..\..\..\Program Files (x86)\Arduino\libraries\LiquidCrystal\src;$(ProjectDir)..\BatteryMonitorControl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <GccToolChain>$(ProjectDir)..\..\..\..\..\..\\Users\\efigarsky\\AppData\\Local\\arduino15\\packages\\arduino\\tools\\avr-gcc\\7.3.0-atmel3.6.1-arduino7\bin\avr-g++</GccToolChain>
       <CppLanguageStandard>gnu++11</CppLanguageStandard>
       <CLanguageStandard>gnu11</CLanguageStandard>
       <CAdditionalWarning />
       <CppAdditionalWarning />
-      <ForcedIncludeFiles>$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\professional\common7\ide\extensions\33x5q2if.r4j\Micro Platforms\default\vm-intelli-pre.h;$(ProjectDir)..\..\..\..\AppData\Local\Temp\VMBuilds\VrefScaleSetup\uno\Release\.vmintelli\1329a0cb72cee3a38017c9218dd5116e\vm-intelli-gcc-defines.h;$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\professional\common7\ide\extensions\33x5q2if.r4j\Micro Platforms\default\vm-intelli-post.h;$(ProjectDir)__vm\.VrefScaleSetup.vsarduino.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <ForcedIncludeFiles>$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\professional\common7\ide\extensions\0axxbbxm.vxj\Micro Platforms\default\vm-intelli-pre.h;$(ProjectDir)..\..\..\..\AppData\Local\Temp\VMBuilds\VrefScaleSetup\uno\Release\.vmintelli\75c314981b54b0621283dea3696cd3e9\vm-intelli-gcc-defines.h;$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\professional\common7\ide\extensions\0axxbbxm.vxj\Micro Platforms\default\vm-intelli-post.h;$(ProjectDir)__vm\.VrefScaleSetup.vsarduino.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <UndefineAllPreprocessorDefinitions>true</UndefineAllPreprocessorDefinitions>
       <IgnoreStandardIncludePath>true</IgnoreStandardIncludePath>
       <PreprocessorDefinitions>_VMICRO_INTELLISENSE;__AVR_atmega328p__;__AVR_ATmega328P__;__AVR_ATmega328p__;F_CPU=16000000L;ARDUINO=108019;ARDUINO_AVR_UNO;ARDUINO_ARCH_AVR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -82,4 +85,9 @@
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+  <ProjectExtensions>
+    <VisualStudio>
+      <UserProperties arduino.upload.port="COM6" config.Release.customdebug_uno_vm_disable_optimization="vm_disable_opt_proj" />
+    </VisualStudio>
+  </ProjectExtensions>
 </Project>
