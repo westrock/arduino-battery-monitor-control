@@ -5,6 +5,7 @@
 */
 
 // the setup function runs once when you press reset or power the board
+#include <EEPROM.h>
 #include <LiquidCrystal.h>
 #include "Arduino.h"
 #include "LCDHelper.h"
@@ -13,19 +14,22 @@
 | #defines                |
 +========================*/
 
-#define VDIV_SCALE 4.588694								//
-#define VREG 5.0										//
+#define USE_EXTERNALVREFx
+#define VREF_RESISTOR	14.92									//
+#define VREG			4.982									//
+
 
 #ifdef USE_EXTERNALVREF
-	#define VREF_RESISTOR 7.7							//
-	#define VREF VREG * 32 / (32 + VREF_RESISTOR)		//
-	#define VREFSCALE VREF / 1024.0 * VDIV_SCALE		//
+#define VDIV_SCALE		4.453964								//
+#define VREF			VREG * 32 / (32 + VREF_RESISTOR)		//
+#define VREFSCALE(x)	VREF / 1024.0 * (x)						//
 #else
-	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
+#define VDIV_SCALE		4.718196								//
+#define VREFSCALE(x)	VREG / 1024.0 * (x)						//
 #endif
 
-#define TEMP_SENSOR A0									// An LM34 thermometer
-#define V5_SENSOR A1									// This pin measures the VREF-limited external (battery) voltage
+#define TEMP_SENSOR A3									// An LM34 thermometer
+#define V5_SENSOR A0									// This pin measures the VREF-limited external (battery) voltage
 #define VBATT_RELAY 4									// This relay allows current to flow in to the pin at V5_SENSOR
 
 #define WAKE_SLEEP_PIN 2								// When low, makes 328P go to sleep
@@ -48,6 +52,7 @@
   | Local Variables         |
   +========================*/
 
+volatile float			vDivScale;
 
 const uint8_t	rs = 11, en = 10, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal	lcd(rs, en, d4, d5, d6, d7);
@@ -100,6 +105,14 @@ void setup() {
 	digitalWrite(VBATT_RELAY, HIGH);
 	delay(100);
 
+
+	EEPROM.get(0, vDivScale);
+	if (vDivScale != vDivScale)
+	{
+		vDivScale = VDIV_SCALE;
+	}
+
+
 #ifdef USE_EXTERNALVREF
 	analogReference(EXTERNAL);
 #else
@@ -136,10 +149,10 @@ void loop() {
 	static bool relayOpen = true;
 
 
-	tempSample = GetAverageTemp(TEMP_SENSOR, VREFSCALE, 10, 10);
+	tempSample = GetAverageTemp(TEMP_SENSOR, VREFSCALE(vDivScale), 10, 10);
 
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
-	scaledVoltage = rawVoltageSample * VREFSCALE;
+	scaledVoltage = rawVoltageSample * VREFSCALE(vDivScale);
 
 	formatFloat(scaledVoltage, voltStr, 5, 2);
 	formatFloat(tempSample, tempStr, 5, 1);
