@@ -22,6 +22,7 @@
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
 
+#include <EEPROM.h>
 #include <Wire.h>
 #include <LiquidCrystal.h>
 #include "Arduino.h"
@@ -39,8 +40,9 @@
 /*==========================+
 |	#defines				|
 +==========================*/
-#define VDIV_SCALE 4.588694								//
-#define VREG 5.0										//
+#define USE_EXTERNALVREFx
+#define VREF_RESISTOR	14.92									//
+#define VREG			4.982									//
 
 #define DEBUGSERIAL
 
@@ -55,11 +57,12 @@
 #endif
 
 #ifdef USE_EXTERNALVREF
-	#define VREF_RESISTOR 7.7							//
+	#define VDIV_SCALE		4.477983								//
 	#define VREF VREG * 32 / (32 + VREF_RESISTOR)		//
-	#define VREFSCALE VREF / 1024.0 * VDIV_SCALE		//
+	#define VREFSCALE(x)	VREF / 1024.0 * (x)			//
 #else
-	#define VREFSCALE VREG / 1024.0 * VDIV_SCALE		//
+	#define VDIV_SCALE		4.718196					//
+	#define VREFSCALE(x)	VREG / 1024.0 * (x)			//
 #endif
 
 #define TEMP_SENSOR				A3					// An LM34 thermometer
@@ -67,12 +70,12 @@
 #define V5_SENSOR				A1					// This pin measures the VREF-limited external (battery) voltage
 #define VBATT_RELAY				9					// This relay allows current to flow in to the pin at V5_SENSOR
 
-#define RTC_WAKE_ALARM			2					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
-#define WAKE_SLEEP_BUTTON		3					// When low, makes 328P go to sleep
+#define RTC_WAKE_ALARM			3					// when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define WAKE_SLEEP_BUTTON		2					// When low, makes 328P go to sleep
 #define LED_PIN					4					// output pin for the LED (to show it is awake)
 
-#define DISABLE_VOLTAGE			11.25
-#define ENABLE_VOLTAGE			11.30
+#define DISABLE_VOLTAGE			12.10
+#define ENABLE_VOLTAGE			12.20
 #define ENABLE_WAIT_MINUTES		2					// <<---- 
 #define BUFF_MAX				256
 #define REPORTING_DELAY_SECONDS	6
@@ -84,37 +87,31 @@
 	#if !(DATA_HOURS==1 || DATA_HOURS==2 || DATA_HOURS==3 || DATA_HOURS==4 || DATA_HOURS==6 || DATA_HOURS==12 || DATA_HOURS==24)
 		#error "DATA_HOURS must be either 1, 2, 3, 4, 6, 12, or 24."
 	#endif
-	#else
-		#error "DATA_HOURS is not defined."
+#else
+	#error "DATA_HOURS is not defined."
 #endif
 
 #ifdef RELAY_TYPE
 	#if !(RELAY_TYPE==BINARY_RELAY || RELAY_TYPE==PWM_RELAY)
 		#error "RELAY_TYPE must be either BINARY_RELAY or PWM_RELAY."
 	#endif
-	#else
-		#error "RELAY_TYPE is not defined."
+#else
+	#error "RELAY_TYPE is not defined."
 #endif
 
 /*==========================+
 | Local structs				|
 +==========================*/
-struct currentSampleStruct
-{
-	DateTimeDS3231	timeNow;
-	float			tempSample;
-	float			scaledVoltage;
-	uint16_t		minutesDisabled = 0;
-};
-typedef struct currentSampleStruct CurrentSample;
 
 
 /*========================+
 | Local Variables         |
 +========================*/
-volatile bool	sleepRequested = true;
-volatile bool	wakeSleepISRSet = false;
+volatile bool			sleepRequested = true;
+volatile bool			wakeSleepISRSet = false;
+volatile float			vDivScale;
 
+static CurrentSample	currentSample;
 static ReportControl	reportControl;
 static SamplingData		samplingData;
 static bool				isOutputRelayClosed = false;		// If not Closed then no power goes through.  If Closed power flows.
@@ -169,6 +166,8 @@ void setup() {
 	isOutputRelayClosed = openRelay(VBATT_RELAY, true);
 	samplingData.isPowerOutDisabled = true;
 	samplingData.isIntialized = false;
+	samplingData.disableVoltage = DISABLE_VOLTAGE;
+	samplingData.enableVoltage = ENABLE_VOLTAGE;
 
 	// Clear the current alarm (puts DS3231 INT high)
 	Wire.begin();
@@ -178,9 +177,31 @@ void setup() {
 	PrepHourlyData(&samplingData.hourlyData[0], DATA_HOURS);
 	reportControl.previousTime = GetTime();
 
+	EEPROM.get(0, vDivScale);
+	if (vDivScale != vDivScale)
+	{
+		vDivScale = VDIV_SCALE;
+	}
+
+	DebugPrint("vDivScale: ");
+	DebugPrintln(vDivScale);
+
 	CreateArrows(lcd);
 
 	DebugPrintln(F("Setup completed."));
+
+	lcd.clear();
+	lcd.print(F("Warming up"));
+
+	for (int i = 0; i < 5; i++)
+	{
+		doBlink(LED_PIN);
+		lcd.setCursor(0, 1);
+		lcd.print(5-i);
+		delay(1000);
+	}
+
+	lcd.clear();
 }
 
 
@@ -214,7 +235,7 @@ void loop()
 	}
 	else
 	{
-		DoReportingTasks(&samplingData, &reportControl, lcd, REPORTING_DELAY_SECONDS);
+		DoReportingTasks(&samplingData, &currentSample, &reportControl, lcd, REPORTING_DELAY_SECONDS);
 	}
 }
 
@@ -226,7 +247,9 @@ void loop()
 void doBlink(uint8_t ledPin) {
 	static unsigned long lastMillis = 0;
 
-	if (millis() > lastMillis + 1000)
+	unsigned long currentMillis = millis();
+
+	if (currentMillis > lastMillis + 1000 || currentMillis < lastMillis)
 	{
 		digitalWrite(ledPin, HIGH);
 		delay(10);
@@ -301,7 +324,6 @@ void RecordTimeDisabled(SamplingData* samplingData, CurrentSample *currentSample
 
 void DoWakingTasks(SamplingData *samplingData)
 {
-	CurrentSample	currentSample;
 	//DateTimeDS3231	timeNow;
 	char			voltStr[6];
 	char			tempStr[6];
@@ -318,7 +340,7 @@ void DoWakingTasks(SamplingData *samplingData)
 
 	currentSample.tempSample = GetAverageDS3231Temp(3, 5);
 	rawVoltageSample = round(GetAverageRawVoltage(V5_SENSOR, 3, 5));
-	currentSample.scaledVoltage = rawVoltageSample * VREFSCALE;
+	currentSample.scaledVoltage = rawVoltageSample * VREFSCALE(vDivScale);
 
 	if (currentSample.scaledVoltage < DISABLE_VOLTAGE)
 	{
@@ -388,12 +410,6 @@ void DoWakingTasks(SamplingData *samplingData)
 			}
 		}
 	}
-
-	//if (samplingData->isPowerOutRecovering && (currentSample.scaledVoltage >= DISABLE_VOLTAGE || currentSample.scaledVoltage < ENABLE_VOLTAGE))
-	//{
-	//	samplingData->isPowerOutRecovering = false;
-	//	lcdClearLine(lcd, 2);
-	//}
 
 	DebugFlush();
 

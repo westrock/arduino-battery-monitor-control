@@ -51,14 +51,26 @@ struct samplingDataStruct
 	bool			isPowerOutDisabled = false;			// Indicates the power out has been disabled (the relay is open)
 	bool			isPowerOutRecovering = false;		// Indicates the power is recovering (the relay is still open)
 	bool			isIntialized = false;				// Indicates whether we're using startup logic
+	float			disableVoltage = 0;					// Voltage at which output power is disabled
+	float			enableVoltage = 0;					// Voltage at which output power is (re-)enabled
 };
 typedef struct samplingDataStruct SamplingData;
+
+
+struct currentSampleStruct
+{
+	DateTimeDS3231	timeNow;
+	float			tempSample;
+	float			scaledVoltage;
+	uint16_t		minutesDisabled = 0;
+};
+typedef struct currentSampleStruct CurrentSample;
 
 
 /*========================+
 | Function Definitions    |
 +========================*/
-void DoReportingTasks(SamplingData* samplingData, ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds);
+void DoReportingTasks(SamplingData* samplingData, CurrentSample* currentSample, ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds);
 float GetAverageRawVoltage(uint8_t voltagePin, uint8_t samples, uint16_t delayMillis);
 float GetAverageVoltage(uint8_t voltagePin, float voltageScale, uint8_t samples, uint16_t delayMillis);
 float GetAverageTemp(uint8_t tempPin, float tempScale, uint8_t samples, uint16_t delayMillis);

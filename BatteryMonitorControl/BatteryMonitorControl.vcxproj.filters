@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="BatteryMonitorControl.ino" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="__vm\.BatteryMonitorControl.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -62,5 +59,6 @@
     <ClCompile Include="DataAcquisitionAndReporting.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="BatteryMonitorControl.ino" />
   </ItemGroup>
 </Project>

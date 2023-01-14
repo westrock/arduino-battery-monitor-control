@@ -11,9 +11,14 @@
 #include "HourlyDataTypes.h"
 
 
-void DoReportingTasks(SamplingData* samplingData, ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds)
+void DoReportingTasks(SamplingData* samplingData, CurrentSample* currentSample, ReportControl* reportControl, LiquidCrystal lcd, int8_t reportingDelaySeconds)
 {
-	DateTimeDS3231 timeNow;
+	DateTimeDS3231	timeNow;
+	char			buffer[20];
+	char			voltStr1[6];
+	char			voltStr2[6];
+	char			tempStr1[6];
+	char			tempStr2[6];
 
 	DS3231_get(&timeNow);
 	int32_t secondsElapsed = dateDiffSeconds(&timeNow, &(reportControl->previousTime));
@@ -25,7 +30,7 @@ void DoReportingTasks(SamplingData* samplingData, ReportControl* reportControl, 
 		switch (reportControl->reportingCycle)
 		{
 		case Report0:
-			lcd.setCursor(0, 1);
+			lcd.setCursor(0, 0);
 			if (samplingData->isPowerOutDisabled)
 			{
 				lcdPrint(lcd, "Power Off", 20);
@@ -33,8 +38,20 @@ void DoReportingTasks(SamplingData* samplingData, ReportControl* reportControl, 
 			else {
 				lcdPrint(lcd, "Power On", 20);
 			}
+
+
+			lcd.setCursor(0, 1);
+			formatFloat(samplingData->disableVoltage, voltStr1, 5, 2);
+			sprintf(buffer, "Disable at %sv", voltStr1);
+			lcdPrint(lcd, buffer, 20);
+
+			lcd.setCursor(0, 2);
+			formatFloat(samplingData->enableVoltage, voltStr2, 5, 2);
+			sprintf(buffer, "Enable at  %sv", voltStr2);
+			lcdPrint(lcd, buffer, 20);
 			break;
 		case Report1:
+
 			lcd.setCursor(0, 1);
 			lcdPrint(lcd, "reportingCycle 1", 20);
 			break;
